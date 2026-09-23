@@ -9,8 +9,8 @@ from typing import Any
 
 _laya_provider = "laya"
 _von_provider = "von"
-_laya_model_dir_env = "DECIDEALOT_LAYA_MODEL_DIR"
-_von_model_dir_env = "DECIDEALOT_VON_MODEL_DIR"
+_model_data_directory = Path("/models")
+_prepare_action = "prepare"
 _laya_host_env = "LAYA_HOST"
 _laya_port_env = "LAYA_PORT"
 _laya_device_env = "LAYA_DEVICE"
@@ -73,19 +73,18 @@ def import_provider_attribute(module_name: str, attribute_name: str) -> Any:
     return getattr(import_module(module_name), attribute_name)
 
 
-def local_model_dir(environment_variable: str) -> Path:
-    """Return a configured provider directory, creating it when necessary."""
+def local_model_dir(provider_name: str) -> Path:
+    """Return one fixed provider directory under the mounted model root."""
 
-    configured_path = os.environ.get(environment_variable, "")
-    path = Path(configured_path)
-    if not configured_path or not path.is_absolute():
-        raise RuntimeError(f"{environment_variable} must be an absolute directory")
+    if provider_name not in {_laya_provider, _von_provider}:
+        raise RuntimeError(f"unsupported local provider: {provider_name}")
+    path = _model_data_directory / provider_name
     try:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as error:
-        raise RuntimeError(f"create configured model directory {environment_variable}") from error
+        raise RuntimeError(f"create local model directory for {provider_name}") from error
     if not os.access(path, os.R_OK | os.X_OK):
-        raise RuntimeError(f"{environment_variable} must be readable")
+        raise RuntimeError(f"local model directory for {provider_name} must be readable")
     return path
 
 
@@ -186,6 +185,18 @@ def ensure_von_model(model_dir: Path) -> None:
     require_von_model(model_dir)
 
 
+def prepare_laya() -> None:
+    """Download or verify Laya without constructing its runtime or importing Torch."""
+
+    ensure_laya_bundle(local_model_dir(_laya_provider))
+
+
+def prepare_von() -> None:
+    """Download or verify Von without constructing its runtime or importing Torch."""
+
+    ensure_von_model(local_model_dir(_von_provider))
+
+
 def enable_offline_model_loading() -> None:
     """Forbid provider fallback network requests after the bundle is prepared."""
 
@@ -206,7 +217,7 @@ def run_laya() -> None:
     create_application = import_provider_attribute(_laya_serve_module, _laya_create_app_name)
 
     apply_thread_limit()
-    model_dir = local_model_dir(_laya_model_dir_env)
+    model_dir = local_model_dir(_laya_provider)
     ensure_laya_bundle(model_dir)
     enable_offline_model_loading()
     models_env = os.environ.get(_laya_models_env, "").strip()
@@ -236,7 +247,7 @@ def run_von() -> None:
     )
     engine_type = import_provider_attribute(_von_engine_module, _von_engine_name)
 
-    model_dir = local_model_dir(_von_model_dir_env)
+    model_dir = local_model_dir(_von_provider)
     ensure_von_model(model_dir)
     enable_offline_model_loading()
     engine = engine_type(
@@ -260,16 +271,26 @@ def run_von() -> None:
 def main() -> None:
     """Select the fixed provider entrypoint requested by Decidealot."""
 
-    if len(sys.argv) != 2:
-        raise SystemExit("expected exactly one provider name")
-    provider_name = sys.argv[1]
-    if provider_name == _laya_provider:
-        run_laya()
-        return
-    if provider_name == _von_provider:
-        run_von()
-        return
-    raise SystemExit(f"unsupported local provider: {provider_name}")
+    arguments = sys.argv[1:]
+    if len(arguments) == 1:
+        provider_name = arguments[0]
+        if provider_name == _laya_provider:
+            run_laya()
+            return
+        if provider_name == _von_provider:
+            run_von()
+            return
+        raise SystemExit(f"unsupported local provider: {provider_name}")
+    if len(arguments) == 2 and arguments[0] == _prepare_action:
+        provider_name = arguments[1]
+        if provider_name == _laya_provider:
+            prepare_laya()
+            return
+        if provider_name == _von_provider:
+            prepare_von()
+            return
+        raise SystemExit(f"unsupported local provider: {provider_name}")
+    raise SystemExit("expected a provider name or 'prepare <provider>'")
 
 
 if __name__ == "__main__":

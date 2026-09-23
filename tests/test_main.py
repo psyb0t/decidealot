@@ -14,7 +14,6 @@ def test_main_runs_the_application_with_validated_settings(
 ) -> None:
     settings = Settings(
         log_file=tmp_path / "decidealot.log",
-        model_data_dir=tmp_path / "models",
         listen_host="127.0.0.1",
         listen_port=8088,
     )

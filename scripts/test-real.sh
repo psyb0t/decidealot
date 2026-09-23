@@ -20,8 +20,9 @@ log() {
 
 image="psyb0t/decidealot:local"
 device="cpu"
-volume_cleanup_attempts=15
-volume_cleanup_poll_seconds=1
+workspace_dir=$(pwd -P)
+healthcheck_attempts=900
+healthcheck_interval_seconds=2
 
 usage() {
 	printf 'usage: %s [--cuda]\n' "${0##*/}" >&2
@@ -40,47 +41,45 @@ case "$#:${1:-}" in
 esac
 
 container_name="decidealot-real-$device-$RANDOM-$RANDOM"
-volume_name="decidealot-real-$device-$RANDOM-$RANDOM"
+mkdir --parents "$workspace_dir/.testing"
+model_directory=$(mktemp -d "$workspace_dir/.testing/decidealot-real-models-$device-XXXXXX")
+chmod 0777 "$model_directory"
 
 cleanup() {
 	local exit_code=$?
-	local volume_removed=0
 	trap - EXIT
 	if [[ -n "${started_container:-}" ]]; then
 		docker stop "$container_name" >/dev/null || log WARN "could not stop test container"
 	fi
-	if [[ -n "${created_volume:-}" ]]; then
-		for _ in $(seq 1 "$volume_cleanup_attempts"); do
-			# Docker releases an --rm container asynchronously after docker stop.
-			if docker volume rm "$volume_name" >/dev/null 2>&1; then
-				volume_removed=1
-				break
-			fi
-			sleep "$volume_cleanup_poll_seconds"
-		done
-		if [[ "$volume_removed" != "1" ]]; then
-			log WARN "could not remove test model volume"
+	if [[ "$model_directory" == "$workspace_dir"/.testing/decidealot-real-models-* ]]; then
+		if ! docker run --rm --user root --entrypoint /bin/sh \
+			--mount "type=bind,source=$model_directory,target=/models" \
+			"$image" -ceu 'rm --recursive --force /models/* /models/.[!.]* /models/..?*'; then
+			log ERROR "could not clear test model directory"
+			exit_code=1
+		fi
+		if ! rmdir -- "$model_directory"; then
+			log ERROR "could not remove test model directory"
+			exit_code=1
 		fi
 	fi
 	exit "$exit_code"
 }
 trap cleanup EXIT
 
-docker volume create "$volume_name" >/dev/null
-created_volume=1
 log INFO "starting actual local model service image=$image device=$device"
 if [[ "$device" == "cuda" ]]; then
 	docker run --detach --rm --init --name "$container_name" --gpus all \
-		--mount "type=volume,source=$volume_name,target=/models" \
+		--mount "type=bind,source=$model_directory,target=/models" \
 		"$image" >/dev/null
 else
 	docker run --detach --rm --init --name "$container_name" \
-		--mount "type=volume,source=$volume_name,target=/models" \
+		--mount "type=bind,source=$model_directory,target=/models" \
 		"$image" >/dev/null
 fi
 started_container=1
 
-for _ in $(seq 1 180); do
+for _ in $(seq 1 "$healthcheck_attempts"); do
 	health_status=$(docker inspect --format '{{.State.Health.Status}}' "$container_name")
 	if [[ "$health_status" == "healthy" ]]; then
 		break
@@ -90,7 +89,7 @@ for _ in $(seq 1 180); do
 		log ERROR "actual local model service became unhealthy"
 		exit 1
 	fi
-	sleep 2
+	sleep "$healthcheck_interval_seconds"
 done
 
 if [[ "${health_status:-}" != "healthy" ]]; then
@@ -98,6 +97,13 @@ if [[ "${health_status:-}" != "healthy" ]]; then
 	log ERROR "actual local model service did not become healthy"
 	exit 1
 fi
+
+for provider_name in laya von; do
+	if [[ -z "$(find "$model_directory/$provider_name" -type f -print -quit)" ]]; then
+		log ERROR "startup did not download the $provider_name model bundle"
+		exit 1
+	fi
+done
 
 log INFO "checking the official model list and one mixed decision per local model"
 docker exec "$container_name" python -c '

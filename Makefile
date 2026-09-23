@@ -116,11 +116,10 @@ sec: dev-image ## Write Python security findings to sec.sarif
 	$(DEV_RUN) bash scripts/sec.sh
 
 audit-compose: ## Enforce the production Compose hardening floor
-	/home/bw/.codex/rig/scripts/audit-compose.sh --file docker-compose.yml
+	bash scripts/audit-compose.sh
 
 audit-compose-cuda: ## Enforce hardening after applying the CUDA Compose override
-	docker compose -f docker-compose.yml -f docker-compose.cuda.yml config > /tmp/decidealot-compose-cuda.yml
-	/home/bw/.codex/rig/scripts/audit-compose.sh --file /tmp/decidealot-compose-cuda.yml
+	bash scripts/audit-compose.sh --cuda
 
 version: ## Print the canonical version
 	@echo $(TAG)

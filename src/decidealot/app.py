@@ -17,7 +17,6 @@ from decidealot.constants import (
     ERROR_CODE_PROVIDER_UNAVAILABLE,
     ERROR_CODE_UNAUTHORIZED,
     HEALTH_PATH,
-    MODEL_UNLOAD_PATH,
     MODELS_PATH,
     MODELS_UNLOAD_PATH,
     SYSTEMONE_PATH,
@@ -76,8 +75,6 @@ class Supervisor(Protocol):
 
     def acquire(self, provider_name: str) -> Any: ...
 
-    async def unload_provider(self, provider_name: str) -> ProviderUnloadResult: ...
-
     async def unload_all(self) -> tuple[ProviderUnloadResult, ...]: ...
 
 
@@ -98,7 +95,7 @@ def create_app(
     else:
         resolved_providers = dict(providers)
     resolved_supervisor = supervisor or ProviderSupervisor(resolved_settings)
-    model_router = ModelRouter(resolved_settings.default_model)
+    model_router = ModelRouter()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
@@ -106,7 +103,6 @@ def create_app(
         logger.info(
             "decidealot started",
             extra={
-                "default_model": resolved_settings.default_model,
                 "device": resolved_settings.device,
             },
         )
@@ -204,21 +200,6 @@ def create_app(
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={"status": "unloaded", "providers": _unload_results_to_json(results)},
-        )
-
-    @app.post(MODEL_UNLOAD_PATH, status_code=status.HTTP_200_OK)
-    async def unload_model(model: str, request: Request) -> JSONResponse:
-        _require_api_authentication(request, resolved_settings)
-        route = model_router.resolve(model)
-        result = await resolved_supervisor.unload_provider(route.provider_name)
-        logger.info("local provider unloaded", extra={"provider": route.provider_name})
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "status": "unloaded",
-                "model": model,
-                "provider": _unload_result_to_json(result),
-            },
         )
 
     @app.post(SYSTEMONE_PATH)

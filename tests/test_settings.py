@@ -10,51 +10,13 @@ from decidealot.constants import DEFAULT_PROVIDER_IDLE_UNLOAD_SECONDS
 from decidealot.settings import Settings
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ("/var/lib/decidealot", Path("/var/lib/decidealot")),
-        (Path("/models"), Path("/models")),
-    ],
-)
-def test_settings_accept_absolute_model_data_dir(value: object, expected: Path) -> None:
-    settings = Settings.model_validate({"model_data_dir": value})
+def test_settings_exposes_no_model_location_or_default_model_configuration() -> None:
+    settings = Settings()
 
-    assert settings.model_data_dir == expected
-
-
-@pytest.mark.parametrize("value", ["relative/models", "", "bad\x00path"])
-def test_settings_reject_unsafe_model_data_dir(value: str) -> None:
-    with pytest.raises(ValidationError, match="absolute path|non-empty path"):
-        Settings.model_validate({"model_data_dir": value})
-
-
-def test_settings_accepts_optional_local_model_directories(tmp_path: Path) -> None:
-    laya_model_dir = tmp_path / "laya"
-    von_model_dir = tmp_path / "von"
-
-    settings = Settings(laya_model_dir=laya_model_dir, von_model_dir=von_model_dir)
-
-    assert settings.laya_model_dir == laya_model_dir
-    assert settings.von_model_dir == von_model_dir
-
-
-@pytest.mark.parametrize("configured_value", ["relative/models", "bad\x00path"])
-def test_settings_rejects_unsafe_local_model_directory(configured_value: str) -> None:
-    with pytest.raises(ValidationError, match="absolute path|non-empty path"):
-        Settings.model_validate({"laya_model_dir": configured_value})
-
-
-@pytest.mark.parametrize("directory_kind", ["file"])
-def test_settings_rejects_unusable_local_model_directory(
-    tmp_path: Path, directory_kind: str
-) -> None:
-    local_model_dir = tmp_path / directory_kind
-    if directory_kind == "file":
-        local_model_dir.write_text("not a directory", encoding="utf-8")
-
-    with pytest.raises(ValidationError, match="must be a directory"):
-        Settings(von_model_dir=local_model_dir)
+    assert not hasattr(settings, "model_data_dir")
+    assert not hasattr(settings, "laya_model_dir")
+    assert not hasattr(settings, "von_model_dir")
+    assert not hasattr(settings, "default_model")
 
 
 @pytest.mark.parametrize(

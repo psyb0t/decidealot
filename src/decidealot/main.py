@@ -21,8 +21,6 @@ def main() -> None:
         extra={
             "listen_host": settings.listen_host,
             "listen_port": settings.listen_port,
-            "model_data_dir": str(settings.model_data_dir),
-            "default_model": settings.default_model,
             "device": settings.device,
             "image_variant": settings.image_variant,
             "provider_idle_unload_seconds": settings.provider_idle_unload_seconds,

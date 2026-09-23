@@ -21,7 +21,9 @@ from decidealot.constants import (
     LOCAL_PROVIDER_ENTRYPOINT,
     MAX_IDLE_REAPER_INTERVAL_SECONDS,
     MIN_IDLE_REAPER_INTERVAL_SECONDS,
+    MODEL_DATA_DIRECTORY,
     PROCESS_STOP_TIMEOUT_SECONDS,
+    PROVIDER_ENTRYPOINT_PREPARE_ACTION,
     VON_BACKEND,
     VON_HEALTH_URL,
     VON_PORT,
@@ -44,6 +46,7 @@ class ProviderSpec:
     health_url: str
     command: tuple[str, ...]
     environment: Mapping[str, str]
+    prepare_command: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,7 @@ class ProviderSupervisor:
         self._last_used_at: dict[str, float] = {}
         self._lifecycle_lock = asyncio.Lock()
         self._provider_switch_condition = asyncio.Condition(self._lifecycle_lock)
+        self._startup_lock = asyncio.Lock()
         self._idle_reaper_task: asyncio.Task[None] | None = None
         self._started = False
 
@@ -80,14 +84,16 @@ class ProviderSupervisor:
         return self._specs
 
     async def start(self) -> None:
-        """Prepare lazy provider lifecycle without loading a model."""
+        """Download missing bundles before declaring lazy provider lifecycle ready."""
 
-        self._prepare_model_data_dir()
-        async with self._provider_switch_condition:
-            if self._started:
-                return
-            self._started = True
-            self._start_idle_reaper_locked()
+        async with self._startup_lock:
+            async with self._provider_switch_condition:
+                if self._started:
+                    return
+            await self._prepare_provider_bundles()
+            async with self._provider_switch_condition:
+                self._started = True
+                self._start_idle_reaper_locked()
         logger.info(
             "local provider lifecycle ready", extra={"providers": list(self._specs_by_name)}
         )
@@ -264,15 +270,32 @@ class ProviderSupervisor:
             raise ProviderUnavailableError("the selected local provider is not configured")
         return spec
 
-    def _prepare_model_data_dir(self) -> None:
-        try:
-            self._settings.model_data_dir.mkdir(parents=True, exist_ok=True)
-            for provider_name in (LAYA_PROVIDER_NAME, VON_PROVIDER_NAME):
-                (self._settings.model_data_dir / provider_name).mkdir(exist_ok=True)
-        except OSError as error:
-            raise RuntimeError("create configured model data directory") from error
-        if not os.access(self._settings.model_data_dir, os.W_OK | os.X_OK):
-            raise RuntimeError("configured model data directory is not writable")
+    async def _prepare_provider_bundles(self) -> None:
+        for spec in self._specs:
+            if spec.prepare_command is None:
+                continue
+            environment = {**os.environ, **spec.environment}
+            logger.info("preparing local provider bundle", extra={"provider": spec.name})
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *spec.prepare_command,
+                    env=environment,
+                    close_fds=True,
+                )
+            except OSError as error:
+                logger.error(
+                    "local provider preparation failed to start",
+                    extra={"provider": spec.name, "error": str(error)},
+                )
+                raise ProviderUnavailableError(f"prepare {spec.name} provider bundle") from error
+            return_code = await process.wait()
+            if return_code != 0:
+                logger.error(
+                    "local provider bundle preparation failed",
+                    extra={"provider": spec.name, "return_code": return_code},
+                )
+                raise ProviderUnavailableError(f"prepare {spec.name} provider bundle")
+            logger.info("local provider bundle prepared", extra={"provider": spec.name})
 
     def _start_process(self, spec: ProviderSpec) -> None:
         environment = {**os.environ, **spec.environment}
@@ -318,15 +341,12 @@ class ProviderSupervisor:
         )
 
     def _default_specs(self) -> tuple[ProviderSpec, ...]:
-        laya_data_dir = self._settings.model_data_dir / LAYA_PROVIDER_NAME
-        von_data_dir = self._settings.model_data_dir / VON_PROVIDER_NAME
-        laya_model_dir = self._settings.laya_model_dir or laya_data_dir
-        von_model_dir = self._settings.von_model_dir or von_data_dir
+        laya_data_dir = MODEL_DATA_DIRECTORY / LAYA_PROVIDER_NAME
+        von_data_dir = MODEL_DATA_DIRECTORY / VON_PROVIDER_NAME
         common_environment = {"LOG_SCOPE_SERVICE": "decidealot"}
         laya_environment = {
             **common_environment,
             "HF_HOME": str(laya_data_dir),
-            "DECIDEALOT_LAYA_MODEL_DIR": str(laya_model_dir),
             "LAYA_HOST": _loopback_address,
             "LAYA_PORT": str(LAYA_PORT),
             "LAYA_DEVICE": self._settings.device,
@@ -335,7 +355,6 @@ class ProviderSupervisor:
         von_environment = {
             **common_environment,
             "HF_HOME": str(von_data_dir),
-            "DECIDEALOT_VON_MODEL_DIR": str(von_model_dir),
             "VON_BACKEND": VON_BACKEND,
             "VON_DEVICE": self._settings.device,
             "VON_HOST": _loopback_address,
@@ -351,6 +370,12 @@ class ProviderSupervisor:
                     LAYA_PROVIDER_NAME,
                 ),
                 environment=laya_environment,
+                prepare_command=(
+                    LAYA_VENV_PYTHON,
+                    LOCAL_PROVIDER_ENTRYPOINT,
+                    PROVIDER_ENTRYPOINT_PREPARE_ACTION,
+                    LAYA_PROVIDER_NAME,
+                ),
             ),
             ProviderSpec(
                 name=VON_PROVIDER_NAME,
@@ -361,6 +386,12 @@ class ProviderSupervisor:
                     VON_PROVIDER_NAME,
                 ),
                 environment=von_environment,
+                prepare_command=(
+                    VON_VENV_PYTHON,
+                    LOCAL_PROVIDER_ENTRYPOINT,
+                    PROVIDER_ENTRYPOINT_PREPARE_ACTION,
+                    VON_PROVIDER_NAME,
+                ),
             ),
         )
 

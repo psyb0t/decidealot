@@ -18,6 +18,7 @@ _loopback_host = "127.0.0.1"
 _request_id = "1d3fb045-4d61-4ecc-b169-cf012a10ea57"
 _first_provider_name = "fixture-one"
 _second_provider_name = "fixture-two"
+_prepare_marker_env = "FIXTURE_PREPARE_MARKER"
 _fake_provider_source = """
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,6 +53,12 @@ class Handler(BaseHTTPRequestHandler):
 port = int(__import__('os').environ['FIXTURE_PROVIDER_PORT'])
 ThreadingHTTPServer(('127.0.0.1', port), Handler).serve_forever()
 """
+_prepare_provider_source = """
+import os
+from pathlib import Path
+
+Path(os.environ['FIXTURE_PREPARE_MARKER']).write_text('prepared', encoding='utf-8')
+"""
 
 
 def _provider_spec(provider_name: str, port: int) -> ProviderSpec:
@@ -69,7 +76,6 @@ async def running_supervisor(
 ) -> AsyncIterator[tuple[ProviderSupervisor, str]]:
     endpoint = f"http://{_loopback_host}:{unused_tcp_port}/v1/systemone"
     settings = Settings(
-        model_data_dir=tmp_path / "models",
         provider_start_timeout_seconds=3,
     )
     supervisor = ProviderSupervisor(
@@ -155,7 +161,6 @@ async def test_supervisor_automatically_unloads_idle_provider_and_reloads_it(
 ) -> None:
     endpoint = f"http://{_loopback_host}:{unused_tcp_port}/v1/systemone"
     settings = Settings(
-        model_data_dir=tmp_path / "models",
         provider_idle_unload_seconds=0.1,
         provider_start_timeout_seconds=3,
     )
@@ -197,7 +202,6 @@ async def test_supervisor_does_not_automatically_unload_an_active_provider(
 ) -> None:
     endpoint = f"http://{_loopback_host}:{unused_tcp_port}/v1/systemone"
     settings = Settings(
-        model_data_dir=tmp_path / "models",
         provider_idle_unload_seconds=0.1,
         provider_start_timeout_seconds=3,
     )
@@ -238,7 +242,6 @@ async def test_supervisor_replaces_resident_provider_for_the_next_model(
     second_endpoint = f"http://{_loopback_host}:{second_port}/v1/systemone"
     supervisor = ProviderSupervisor(
         Settings(
-            model_data_dir=tmp_path / "models",
             provider_idle_unload_seconds=0,
             provider_start_timeout_seconds=3,
         ),
@@ -282,7 +285,7 @@ async def test_supervisor_waits_for_an_active_provider_before_switching_models(
     second_port = unused_tcp_port_factory()
     second_endpoint = f"http://{_loopback_host}:{second_port}/v1/systemone"
     supervisor = ProviderSupervisor(
-        Settings(model_data_dir=tmp_path / "models", provider_start_timeout_seconds=3),
+        Settings(provider_start_timeout_seconds=3),
         specs=(
             _provider_spec(_first_provider_name, first_port),
             _provider_spec(_second_provider_name, second_port),
@@ -311,3 +314,68 @@ async def test_supervisor_waits_for_an_active_provider_before_switching_models(
         await supervisor.stop()
 
     assert second_response.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_supervisor_prepares_every_bundle_before_it_reports_ready(tmp_path: Path) -> None:
+    first_marker = tmp_path / "first-prepared"
+    second_marker = tmp_path / "second-prepared"
+    supervisor = ProviderSupervisor(
+        Settings(),
+        specs=(
+            ProviderSpec(
+                name=_first_provider_name,
+                health_url="http://127.0.0.1:1/health",
+                command=(sys.executable, "-c", _fake_provider_source),
+                environment={
+                    "FIXTURE_PROVIDER_PORT": "1",
+                    _prepare_marker_env: str(first_marker),
+                },
+                prepare_command=(sys.executable, "-c", _prepare_provider_source),
+            ),
+            ProviderSpec(
+                name=_second_provider_name,
+                health_url="http://127.0.0.1:2/health",
+                command=(sys.executable, "-c", _fake_provider_source),
+                environment={
+                    "FIXTURE_PROVIDER_PORT": "2",
+                    _prepare_marker_env: str(second_marker),
+                },
+                prepare_command=(sys.executable, "-c", _prepare_provider_source),
+            ),
+        ),
+    )
+
+    await supervisor.start()
+    try:
+        assert supervisor.ready
+        unloaded = await supervisor.unload_all()
+    finally:
+        await supervisor.stop()
+
+    assert first_marker.read_text(encoding="utf-8") == "prepared"
+    assert second_marker.read_text(encoding="utf-8") == "prepared"
+    assert all(not result.was_loaded for result in unloaded)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_failed_bundle_preparation_prevents_readiness() -> None:
+    supervisor = ProviderSupervisor(
+        Settings(),
+        specs=(
+            ProviderSpec(
+                name=_first_provider_name,
+                health_url="http://127.0.0.1:1/health",
+                command=(sys.executable, "-c", _fake_provider_source),
+                environment={"FIXTURE_PROVIDER_PORT": "1"},
+                prepare_command=(sys.executable, "-c", "raise SystemExit(1)"),
+            ),
+        ),
+    )
+
+    with pytest.raises(ProviderUnavailableError, match="prepare fixture-one provider bundle"):
+        await supervisor.start()
+
+    assert supervisor.ready is False

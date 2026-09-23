@@ -20,7 +20,6 @@ from decidealot.provider_entrypoint import (
     require_von_model,
 )
 
-_laya_model_dir_env = "DECIDEALOT_LAYA_MODEL_DIR"
 _laya_repository = "convaiinnovations/laya"
 _von_repository = "wfzyx/von"
 _laya_revision = "5e7b2b1b8ca2ecdd3f2322d94069c9b6ce7e844b"
@@ -107,32 +106,19 @@ def test_von_model_validation_requires_calibration_data(tmp_path: Path) -> None:
         require_von_model(tmp_path)
 
 
-def test_local_model_dir_uses_the_configured_absolute_directory(
+def test_local_model_dir_uses_the_fixed_provider_subdirectory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv(_laya_model_dir_env, str(tmp_path))
+    monkeypatch.setattr(provider_entrypoint, "_model_data_directory", tmp_path)
 
-    assert local_model_dir(_laya_model_dir_env) == tmp_path
-
-
-def test_local_model_dir_creates_a_missing_absolute_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    model_dir = tmp_path / "models" / "laya"
-    monkeypatch.setenv(_laya_model_dir_env, str(model_dir))
-
-    assert local_model_dir(_laya_model_dir_env) == model_dir
-    assert model_dir.is_dir()
+    assert local_model_dir("laya") == tmp_path / "laya"
+    assert (tmp_path / "laya").is_dir()
 
 
-@pytest.mark.parametrize("configured_value", ["", "relative-model-dir"])
-def test_local_model_dir_rejects_missing_or_relative_path_configuration(
-    monkeypatch: pytest.MonkeyPatch, configured_value: str
-) -> None:
-    monkeypatch.setenv(_laya_model_dir_env, configured_value)
-
-    with pytest.raises(RuntimeError, match="absolute directory"):
-        local_model_dir(_laya_model_dir_env)
+@pytest.mark.parametrize("provider_name", ["", "remote-url", "https://example.test"])
+def test_local_model_dir_rejects_unsupported_provider_names(provider_name: str) -> None:
+    with pytest.raises(RuntimeError, match="unsupported local provider"):
+        local_model_dir(provider_name)
 
 
 @pytest.mark.parametrize(
@@ -392,11 +378,27 @@ def test_provider_entrypoint_selects_only_the_requested_provider(
     assert calls == [expected_call]
 
 
+@pytest.mark.parametrize(("provider_name", "expected_call"), [("laya", "laya"), ("von", "von")])
+def test_provider_entrypoint_prepares_only_the_requested_provider(
+    monkeypatch: pytest.MonkeyPatch, provider_name: str, expected_call: str
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(sys, "argv", ["provider_entrypoint", "prepare", provider_name])
+    monkeypatch.setattr(provider_entrypoint, "prepare_laya", lambda: calls.append("laya"))
+    monkeypatch.setattr(provider_entrypoint, "prepare_von", lambda: calls.append("von"))
+
+    provider_entrypoint.main()
+
+    assert calls == [expected_call]
+
+
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [
-        (["provider_entrypoint"], "expected exactly one"),
+        (["provider_entrypoint"], "expected a provider name"),
         (["provider_entrypoint", "other"], "unsupported local provider"),
+        (["provider_entrypoint", "prepare"], "unsupported local provider"),
+        (["provider_entrypoint", "prepare", "other"], "unsupported local provider"),
     ],
 )
 def test_provider_entrypoint_rejects_invalid_provider_selection(

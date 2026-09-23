@@ -15,15 +15,13 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       DECIDEALOT_API_KEY: ${DECIDEALOT_API_KEY:-}
-      DECIDEALOT_MODEL_DATA_DIR: /models
-      DECIDEALOT_LAYA_MODEL_DIR: ${DECIDEALOT_LAYA_MODEL_DIR:-}
-      DECIDEALOT_VON_MODEL_DIR: ${DECIDEALOT_VON_MODEL_DIR:-}
-      DECIDEALOT_DEFAULT_MODEL: ${DECIDEALOT_DEFAULT_MODEL:-laya}
       DECIDEALOT_LOG_LEVEL: ${DECIDEALOT_LOG_LEVEL:-INFO}
       DECIDEALOT_MAX_REQUEST_BYTES: ${DECIDEALOT_MAX_REQUEST_BYTES:-1048576}
       DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS: ${DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS:-600}
     volumes:
-      - decidealot-model-data:/models
+      - type: bind
+        source: ${DECIDEALOT_MODEL_DIRECTORY:?set DECIDEALOT_MODEL_DIRECTORY to a writable host directory owned by UID and GID 10001}
+        target: /models
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
       - /var/run:rw,noexec,nosuid,size=8m
@@ -44,6 +42,3 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
-
-volumes:
-  decidealot-model-data:

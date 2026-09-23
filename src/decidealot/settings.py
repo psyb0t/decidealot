@@ -1,6 +1,5 @@
 """Validated process-wide configuration."""
 
-import os
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
@@ -15,8 +14,6 @@ from decidealot.constants import (
     DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_REQUEST_BYTES,
-    DEFAULT_MODEL,
-    DEFAULT_MODEL_DATA_DIR,
     DEFAULT_PROVIDER_IDLE_UNLOAD_SECONDS,
     DEFAULT_PROVIDER_START_TIMEOUT_SECONDS,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
@@ -26,7 +23,6 @@ from decidealot.constants import (
 Device = Literal["cpu", "cuda"]
 ImageVariant = Literal["cpu", "cuda"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
-ModelName = Literal["laya", "von"]
 
 
 def _absolute_path(value: object) -> Path:
@@ -42,15 +38,6 @@ def _absolute_path(value: object) -> Path:
 AbsolutePath = Annotated[Path, BeforeValidator(_absolute_path)]
 
 
-def _optional_absolute_path(value: object) -> Path | None:
-    if value is None or value == "":
-        return None
-    return _absolute_path(value)
-
-
-OptionalAbsolutePath = Annotated[Path | None, BeforeValidator(_optional_absolute_path)]
-
-
 class Settings(BaseSettings):
     """All configuration is parsed once during process startup."""
 
@@ -59,10 +46,6 @@ class Settings(BaseSettings):
     api_key: SecretStr | None = None
     listen_host: str = Field(default=DEFAULT_LISTEN_HOST, min_length=1, max_length=255)
     listen_port: int = Field(default=DEFAULT_LISTEN_PORT, ge=1024, le=65535)
-    model_data_dir: AbsolutePath = DEFAULT_MODEL_DATA_DIR
-    laya_model_dir: OptionalAbsolutePath = None
-    von_model_dir: OptionalAbsolutePath = None
-    default_model: ModelName = cast(ModelName, DEFAULT_MODEL)
     device: Device = cast(Device, DEFAULT_DEVICE)
     image_variant: ImageVariant = cast(ImageVariant, DEFAULT_IMAGE_VARIANT)
     log_level: LogLevel = cast(LogLevel, DEFAULT_LOG_LEVEL)
@@ -109,9 +92,6 @@ class Settings(BaseSettings):
         installed_image_variant = _read_installed_image_variant()
         if installed_image_variant is not None and self.image_variant != installed_image_variant:
             raise ValueError("DECIDEALOT_IMAGE_VARIANT must match the installed image variant")
-        for model_dir in (self.laya_model_dir, self.von_model_dir):
-            if model_dir is not None:
-                _validate_local_model_dir(model_dir)
         return self
 
 
@@ -127,17 +107,3 @@ def _read_installed_image_variant() -> ImageVariant | None:
     if variant not in {"cpu", "cuda"}:
         raise ValueError("installed image variant metadata is invalid")
     return cast(ImageVariant, variant)
-
-
-def _validate_local_model_dir(model_dir: Path) -> None:
-    if model_dir.exists() and not model_dir.is_dir():
-        raise ValueError("configured local model directory must be a directory")
-    if model_dir.exists() and not os.access(model_dir, os.R_OK | os.X_OK):
-        raise ValueError("configured local model directory must be readable")
-    if model_dir.exists():
-        return
-    existing_parent = model_dir.parent
-    while not existing_parent.exists():
-        existing_parent = existing_parent.parent
-    if not os.access(existing_parent, os.W_OK | os.X_OK):
-        raise ValueError("configured local model directory parent must be writable")

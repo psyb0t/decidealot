@@ -1,7 +1,6 @@
 """Contract tests exercise the public router and middleware with fake providers."""
 
 from collections.abc import Iterator
-from typing import cast
 
 import pytest
 from pydantic import SecretStr
@@ -9,7 +8,7 @@ from pydantic import SecretStr
 from decidealot.app import create_embedded_app
 from decidealot.constants import LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
 from decidealot.providers import ProviderResponse
-from decidealot.settings import ModelName, Settings
+from decidealot.settings import Settings
 from tests.conftest import (
     FakeProvider,
     HTTPClient,
@@ -67,20 +66,6 @@ def test_system_one_acquires_the_selected_provider_before_forwarding(
     assert supervisor.stopped
 
 
-def test_jev_alias_uses_configured_default_provider(provider_pair: dict[str, FakeProvider]) -> None:
-    app = create_embedded_app(
-        Settings(default_model=cast(ModelName, VON_PROVIDER_NAME)), provider_pair
-    )
-
-    with app_client(app) as client:
-        response = client.post("/v1/systemone", json=system_one_request("jev-latest"))
-
-    assert response.status_code == 200
-    assert response.json()["model"] == "von-1.1"
-    assert provider_pair[VON_PROVIDER_NAME].calls[0][0]["model"] == "von-1.1"
-    assert provider_pair[LAYA_PROVIDER_NAME].calls == []
-
-
 def test_system_one_returns_unavailable_when_selected_provider_fails(
     client: HTTPClient,
     provider_pair: dict[str, FakeProvider],
@@ -112,45 +97,6 @@ def test_health_reports_lifecycle_readiness(client: HTTPClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "providers": ["laya", "von"]}
-
-
-def test_model_unload_is_authenticated_and_idempotent(
-    provider_pair: dict[str, FakeProvider],
-) -> None:
-    supervisor = LifecycleSupervisor()
-    app = create_embedded_app(Settings(api_key=_operator_api_key), provider_pair, supervisor)
-
-    with app_client(app) as client:
-        denied_response = client.post("/v1/models/laya/unload")
-        loaded_response = client.post(
-            "/v1/systemone",
-            headers=_operator_authorization,
-            json=system_one_request("laya"),
-        )
-        first_response = client.post("/v1/models/laya/unload", headers=_operator_authorization)
-        second_response = client.post("/v1/models/laya/unload", headers=_operator_authorization)
-
-    assert denied_response.status_code == 401
-    assert loaded_response.status_code == 200
-    assert first_response.json() == {
-        "status": "unloaded",
-        "model": "laya",
-        "provider": {"name": "laya", "wasLoaded": True},
-    }
-    assert second_response.json()["provider"] == {"name": "laya", "wasLoaded": False}
-
-
-def test_model_unload_rejects_unknown_model_without_lifecycle_call(
-    provider_pair: dict[str, FakeProvider],
-) -> None:
-    supervisor = LifecycleSupervisor()
-    app = create_embedded_app(Settings(), provider_pair, supervisor)
-
-    with app_client(app) as client:
-        response = client.post("/v1/models/not-a-local-model/unload")
-
-    assert response.status_code == 400
-    assert supervisor.loaded_providers == set()
 
 
 def test_all_model_unload_is_atomic_when_a_provider_is_busy(

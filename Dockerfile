@@ -50,7 +50,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/app-venv/bin:$PATH \
     DECIDEALOT_DEVICE=cpu \
     DECIDEALOT_IMAGE_VARIANT=cpu \
-    DECIDEALOT_MODEL_DATA_DIR=/models \
     DECIDEALOT_LOG_FILE=/tmp/decidealot.log \
     TZ=UTC
 
@@ -70,7 +69,7 @@ WORKDIR /app
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=10s --timeout=3s --start-period=180s --retries=5 \
+HEALTHCHECK --interval=10s --timeout=3s --start-period=900s --retries=5 \
     CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status == 200 else 1)"
 
 ENTRYPOINT ["decidealot"]

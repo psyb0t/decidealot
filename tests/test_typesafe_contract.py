@@ -9,7 +9,7 @@ from pydantic import SecretStr
 from decidealot.app import create_embedded_app
 from decidealot.constants import LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
 from decidealot.providers import ProviderResponse
-from decidealot.settings import ModelName, Settings
+from decidealot.settings import Settings
 from tests.conftest import (
     FakeProvider,
     HTTPClient,
@@ -35,7 +35,6 @@ _laya_selectors = (
     "laya-typed-decisions",
 )
 _von_selectors = ("von", "von-latest", "von-1.1", "von-1.1.0")
-_jev_selectors = ("jev", "jev-1", "jev-1.0", "jev-latest")
 _model_metadata_fields = {"name", "description", "release_date"}
 
 
@@ -80,7 +79,6 @@ def test_models_returns_the_official_model_metadata_list(client: HTTPClient) -> 
     assert [entry["name"] for entry in body["models"]] == [
         *_laya_selectors,
         *_von_selectors,
-        *_jev_selectors,
     ]
     for entry in body["models"]:
         assert set(entry) == _model_metadata_fields
@@ -89,22 +87,6 @@ def test_models_returns_the_official_model_metadata_list(client: HTTPClient) -> 
     release_dates = {entry["name"]: entry["release_date"] for entry in body["models"]}
     assert {release_dates[name] for name in _laya_selectors} == {_laya_release_date}
     assert {release_dates[name] for name in _von_selectors} == {_von_release_date}
-    assert {release_dates[name] for name in _jev_selectors} == {_laya_release_date}
-
-
-def test_models_describes_jev_aliases_by_the_configured_default(
-    provider_pair: dict[str, FakeProvider],
-) -> None:
-    app = create_embedded_app(
-        Settings(default_model=cast(ModelName, VON_PROVIDER_NAME)), provider_pair
-    )
-
-    with app_client(app) as client:
-        body = client.get(_models_path).json()
-
-    entries = {entry["name"]: entry for entry in body["models"]}
-    assert entries["jev-latest"]["release_date"] == _von_release_date
-    assert "von-1.1" in entries["jev-latest"]["description"]
 
 
 def test_every_listed_model_name_is_accepted_by_system_one(client: HTTPClient) -> None:
@@ -184,6 +166,11 @@ def test_both_operations_are_open_when_no_api_key_is_configured(client: HTTPClie
             ["body", "questions", "a", "choice", "criteria"],
         ),
         ({"model": "not-a-model", "state": "s", "questions": {"a": {"type": "noul"}}}, None),
+        ({"model": "jev", "state": "s", "questions": {"a": {"type": "noul"}}}, None),
+        (
+            {"model": "jev-latest", "state": "s", "questions": {"a": {"type": "noul"}}},
+            None,
+        ),
     ],
 )
 def test_malformed_bodies_return_the_official_validation_envelope(
