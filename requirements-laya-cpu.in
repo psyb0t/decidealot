@@ -1,0 +1,2 @@
+# Owner-approved age-gate exception. PyPI did not publish 0.3.7, so use the official upstream v0.3.7 source archive pinned by commit. The generated lock supplies the SHA-256.
+laya[serve] @ https://github.com/NandhaKishorM/laya/archive/010bacef009c855ccba814b51f7c8e1d38ab5e3f.tar.gz

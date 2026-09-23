@@ -1,0 +1,21 @@
+title = "decidealot secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Gitignored local state and generated scan output"
+paths = [
+  '''(^|/)\.env$''',
+  '''(^|/)\.env\.local$''',
+  '''(^|/)\.research_files(?:/|$)''',
+  '''(^|/)\.testing(?:/|$)''',
+  '''(^|/)\.agent_notes(?:/|$)''',
+  '''(^|/)\.agent_knowledge(?:/|$)''',
+  '''(^|/)\.telemetry(?:/|$)''',
+  '''(^|/)coverage-percent\.txt$''',
+  '''(^|/)sec\.sarif$''',
+  '''(^|/)git-update\.sh$''',
+  '''(^|/)CLAUDE\.md$''',
+  '''(^|/)PLAN\.md$''',
+]

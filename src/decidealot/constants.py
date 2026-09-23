@@ -1,0 +1,53 @@
+"""Stable configuration and provider constants."""
+
+import tempfile
+from pathlib import Path
+
+# Container services bind here, while Compose publishes only to host loopback.
+DEFAULT_LISTEN_HOST = "0.0.0.0"  # noqa: S104  # nosec B104
+DEFAULT_LISTEN_PORT = 8080
+DEFAULT_LOG_FILE = Path(tempfile.gettempdir()) / "decidealot.log"
+DEFAULT_MODEL_DATA_DIR = Path("/models")
+DEFAULT_MODEL = "laya"
+DEFAULT_DEVICE = "cpu"
+DEFAULT_IMAGE_VARIANT = "cpu"
+IMAGE_VARIANT_METADATA_PATH = Path("/etc/decidealot/image-variant")
+DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 120.0
+DEFAULT_PROVIDER_START_TIMEOUT_SECONDS = 180.0
+DEFAULT_PROVIDER_IDLE_UNLOAD_SECONDS = 600.0
+DEFAULT_MAX_REQUEST_BYTES = 1_048_576
+PROCESS_STOP_TIMEOUT_SECONDS = 10.0
+MIN_IDLE_REAPER_INTERVAL_SECONDS = 0.01
+MAX_IDLE_REAPER_INTERVAL_SECONDS = 30.0
+LAYA_PROVIDER_NAME = "laya"
+VON_PROVIDER_NAME = "von"
+LAYA_HOST = "127.0.0.1"
+VON_HOST = "127.0.0.1"
+LAYA_PORT = 8011
+VON_PORT = 8012
+LAYA_HEALTH_URL = f"http://{LAYA_HOST}:{LAYA_PORT}/health"
+VON_HEALTH_URL = f"http://{VON_HOST}:{VON_PORT}/health"
+LAYA_SYSTEMONE_URL = f"http://{LAYA_HOST}:{LAYA_PORT}/v1/systemone"
+VON_SYSTEMONE_URL = f"http://{VON_HOST}:{VON_PORT}/v1/systemone"
+LAYA_VENV_COMMAND = "/opt/laya-venv/bin/laya-serve"
+LAYA_VENV_PYTHON = "/opt/laya-venv/bin/python"
+VON_VENV_COMMAND = "/opt/von-venv/bin/von"
+VON_VENV_PYTHON = "/opt/von-venv/bin/python"
+LOCAL_PROVIDER_ENTRYPOINT = "/opt/decidealot/provider_entrypoint.py"
+HF_HUB_OFFLINE = "1"
+TRANSFORMERS_OFFLINE = "1"
+VON_BACKEND = "von-1.1"
+REQUEST_ID_HEADER = "X-Request-Id"
+BEARER_PREFIX = "Bearer "
+MAX_REQUEST_ID_LENGTH = 64
+SYSTEMONE_PATH = "/v1/systemone"
+MODELS_PATH = "/v1/models"
+MODELS_UNLOAD_PATH = "/v1/models/unload"
+MODEL_UNLOAD_PATH = "/v1/models/{model}/unload"
+HEALTH_PATH = "/health"
+ERROR_CODE_INVALID_REQUEST = "INVALID_REQUEST"
+ERROR_CODE_UNAUTHORIZED = "UNAUTHORIZED"
+ERROR_CODE_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
+ERROR_CODE_PROVIDER_BUSY = "PROVIDER_BUSY"
+ERROR_CODE_REQUEST_TOO_LARGE = "REQUEST_TOO_LARGE"

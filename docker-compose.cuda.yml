@@ -1,0 +1,10 @@
+services:
+  decidealot:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    image: psyb0t/decidealot:local-cuda
+    gpus: all
+    environment:
+      DECIDEALOT_DEVICE: cuda
+      DECIDEALOT_IMAGE_VARIANT: cuda

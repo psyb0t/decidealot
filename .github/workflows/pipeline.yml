@@ -1,0 +1,57 @@
+name: pipeline
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  code:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    permissions:
+      contents: read
+      security-events: write
+    uses: psyb0t/reusable-github-workflows/.github/workflows/code-workflow.yml@master
+    with:
+      lint_command: "make lint"
+      test_command: "make test-coverage"
+      sec_command: "make sec"
+      generate_command: "make generate"
+      coverage_file: "coverage-percent.txt"
+      sarif_file: "sec.sarif"
+      sarif_category: "python"
+
+  docker:
+    needs: [code]
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    permissions:
+      contents: write
+      security-events: write
+    uses: psyb0t/reusable-github-workflows/.github/workflows/docker-image-workflow.yml@master
+    with:
+      repository_name: psyb0t/decidealot
+      target_platforms: "linux/amd64"
+      build_targets: >-
+        [{"file":"Dockerfile","tag_suffix":"","platforms":"linux/amd64"},{"file":"Dockerfile.cuda","tag_suffix":"-cuda","platforms":"linux/amd64"}]
+      scan_severity: "high"
+      scan_fail_build: false
+      dockerhub_private: false
+      sync_description: true
+      cache_mode: "min"
+    secrets:
+      dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+      dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  badges:
+    needs: [code]
+    if: github.ref_name == github.event.repository.default_branch || startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    uses: psyb0t/reusable-github-workflows/.github/workflows/create-badges.yml@master
+    with:
+      coverage: true

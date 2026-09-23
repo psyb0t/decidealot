@@ -1,0 +1,51 @@
+# Agent and local development state
+AGENTS.md
+CODEX.local.md
+.research_files/
+.testing/
+.agent_notes/
+.agent_knowledge/
+.telemetry/
+PLAN.md
+implplan.md
+NOTES.md
+TODO.md
+WIP.md
+
+# Secrets and local configuration
+.env
+.env.local
+.env.*
+!.env.example
+
+# Python and test artifacts
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+coverage-percent.txt
+sec.sarif
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Container and local tooling state
+git-update.sh
+.dockerignore.local
+.vscode/
+.idea/
+.editorconfig
+.envrc
+.tool-versions
+.python-version
+.nvmrc
+pyrightconfig.json
+
+# Logs and model data
+*.log
+model-data/

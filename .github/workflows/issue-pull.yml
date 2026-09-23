@@ -1,0 +1,17 @@
+name: issue-pull
+
+on:
+  schedule:
+    - cron: "37 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  issue-pull:
+    permissions:
+      issues: write
+    uses: psyb0t/reusable-github-workflows/.github/workflows/issue-pull.yml@master
+    with:
+      jitter_seconds: ${{ github.event_name == 'schedule' && 600 || 0 }}
+    secrets:
+      codeberg_token: ${{ secrets.CODEBERG_TOKEN }}
+      gitlab_token: ${{ secrets.GITLAB_TOKEN }}

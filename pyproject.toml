@@ -1,0 +1,90 @@
+[project]
+name = "decidealot"
+version = "0.1.0"
+description = "Run local System One decision models behind one TypeSafe-compatible HTTP endpoint."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Ciprian Mandache", email = "psyb0t@51k.eu" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "fastapi==0.141.1",
+    "httpx==0.28.1",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "python-json-logger==4.2.0",
+    "uvicorn==0.53.0",
+]
+
+[project.scripts]
+decidealot = "decidealot.main:main"
+
+[project.urls]
+Homepage = "https://github.com/psyb0t/decidealot"
+Issues = "https://github.com/psyb0t/decidealot/issues"
+
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/decidealot"]
+
+[dependency-groups]
+dev = [
+    "bandit==1.9.4",
+    "mypy==2.3.1",
+    "pip-audit==2.10.1",
+    "pyright==1.1.414",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.7",
+]
+
+[tool.uv]
+# New third-party releases must be at least seven days old. The two exact model
+# packages below have an owner-approved exception recorded in .testing/.
+exclude-newer = "2026-09-16T13:10:08Z"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/decidealot/app.py" = ["B008"]
+"tests/**" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short -m 'not integration and not real' --ignore=.research_files"
+markers = [
+    "integration: production-component integration checks that launch local processes",
+    "real: opt-in tests that download and run the actual Laya and Von weights",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["decidealot"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src", "tests"]

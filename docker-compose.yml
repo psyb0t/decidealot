@@ -1,0 +1,49 @@
+services:
+  decidealot:
+    build:
+      context: .
+    image: psyb0t/decidealot:local
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DECIDEALOT_API_KEY: ${DECIDEALOT_API_KEY:-}
+      DECIDEALOT_MODEL_DATA_DIR: /models
+      DECIDEALOT_LAYA_MODEL_DIR: ${DECIDEALOT_LAYA_MODEL_DIR:-}
+      DECIDEALOT_VON_MODEL_DIR: ${DECIDEALOT_VON_MODEL_DIR:-}
+      DECIDEALOT_DEFAULT_MODEL: ${DECIDEALOT_DEFAULT_MODEL:-laya}
+      DECIDEALOT_LOG_LEVEL: ${DECIDEALOT_LOG_LEVEL:-INFO}
+      DECIDEALOT_MAX_REQUEST_BYTES: ${DECIDEALOT_MAX_REQUEST_BYTES:-1048576}
+      DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS: ${DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS:-600}
+    volumes:
+      - decidealot-model-data:/models
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /var/run:rw,noexec,nosuid,size=8m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8g
+          pids: 512
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  decidealot-model-data:
