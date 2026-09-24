@@ -8,7 +8,19 @@
 
 Run Laya and Von decision models on your own machine through the TypeSafe System One HTTP API. No hosted model bill. No response parser held together with duct tape.
 
-At startup Decidealot downloads and verifies both local model bundles. It then loads only the model selected by a request, unloads it after the configured idle period, and returns typed `choice`, `score`, and `noul` answers with model probabilities. It exposes `POST /v1/systemone`, `GET /v1/models`, and one explicit unload endpoint for releasing model and Torch memory.
+At startup Decidealot downloads and verifies both local model bundles. It then loads only the model selected by a request, unloads it after the configured idle period, and returns typed `choice`, `score`, and `noul` answers with model probabilities. It exposes the TypeSafe HTTP API and MCP Streamable HTTP from the same local container.
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Use the API](#use-the-api)
+- [Use MCP](#use-mcp)
+- [Pick a model](#pick-a-model)
+- [Configuration](#configuration)
+- [CUDA](#cuda)
+- [Model storage and unloading](#model-storage-and-unloading)
+- [Agent integrations](#agent-integrations)
+- [Docs](#docs)
 
 ## Quick start
 
@@ -26,7 +38,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.2.0
+  psyb0t/decidealot:v0.3.0
 ```
 
 Check the service, then ask Laya to make one typed decision:
@@ -63,9 +75,31 @@ Send raw state and questions. Do not send a decision you already made and expect
 | `POST /v1/systemone` | Runs the selected model against `state` and returns typed answers. |
 | `GET /v1/models` | Lists every supported alias and the model behind it. |
 | `POST /v1/models/unload` | Stops all providers. |
+| `/mcp` | Version 2 MCP Streamable HTTP, with `system_one`, `list_models`, and `unload_models` tools. |
 | `GET /health` | Confirms that Decidealot can manage providers. It does not load one. |
 
 `choice` questions need named `criteria`. `score` questions need an ordered criteria array whose position is the score. `noul` questions return a probability between zero and one. [The API guide](docs/api.md) has the request rules, response shape, validation failures, aliases, authentication, and lifecycle behavior.
+
+## Use MCP
+
+The same container serves MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. There is no second port, separate model lifecycle, or alternate input shape. Use an MCP client that supports Streamable HTTP. The `system_one` tool takes the same required `model`, `state`, and `questions` fields as `POST /v1/systemone`. `list_models` returns the live catalog. `unload_models` releases every idle local runtime.
+
+Point an MCP client at that exact URL. Its configuration format varies, but the connection values are always equivalent to this:
+
+```json
+{
+  "mcpServers": {
+    "decidealot": {
+      "url": "http://127.0.0.1:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer your-token-here"
+      }
+    }
+  }
+}
+```
+
+Omit the `Authorization` header only when `DECIDEALOT_API_KEY` is empty. The MCP tools return structured output matching the HTTP result bodies, so an agent can inspect probabilities before it chooses the next action. A client that only supports local stdio can use the optional OpenClaw bridge described in [Agent integrations](#agent-integrations). [The API guide](docs/api.md#mcp-streamable-http) has tool inputs, output shapes, session behavior, and failure behavior.
 
 ## Pick a model
 
@@ -95,7 +129,7 @@ Pass configuration with `--env-file` or your container manager. The image uses f
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `DECIDEALOT_API_KEY` | empty | Optional Bearer token for every public endpoint. |
+| `DECIDEALOT_API_KEY` | empty | Optional Bearer token for every public API and MCP request. |
 | `DECIDEALOT_MAX_REQUEST_BYTES` | `1048576` | Maximum JSON request body size. |
 | `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` | `600` | Idle time before automatic unload. Set `0` to disable only timeout-based unloads. |
 
@@ -103,16 +137,22 @@ The container always stores bundles under `/models`. Its only model storage sett
 
 ## CUDA
 
-`psyb0t/decidealot:v0.2.0-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
+`psyb0t/decidealot:v0.3.0-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
 
 ```bash
-docker run --detach --name decidealot --gpus all \
+docker run --detach --name decidealot --init --restart unless-stopped \
+  --gpus all --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+  --pids-limit 512 --memory 8g --cpus 4 \
+  --tmpfs /tmp:rw,noexec,nosuid,size=128m \
+  --tmpfs /var/run:rw,noexec,nosuid,size=8m \
+  --tmpfs /var/cache:rw,exec,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=0755 \
+  --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.2.0-cuda
+  psyb0t/decidealot:v0.3.0-cuda
 ```
 
-Use the hardening options from the CPU quick start here too. [Deployment](docs/deployment.md) has the complete CPU, CUDA, authentication, persistent-storage, and host-directory recipes.
+CUDA needs one writable executable cache because Triton compiles and loads short-lived CUDA helpers there. The rest of the container remains read-only and `noexec`. [Deployment](docs/deployment.md) has the complete CPU, CUDA, authentication, persistent-storage, and host-directory recipes.
 
 ## Model storage and unloading
 
@@ -125,6 +165,25 @@ curl --fail --request POST http://127.0.0.1:8080/v1/models/unload
 ```
 
 Only one provider can be loaded, but the endpoint reports both providers so the result is clear. Unload terminates the provider process, so it releases model weights, Torch allocations, worker threads, and the CUDA context. A later request starts it again.
+
+## Agent integrations
+
+Install the Decidealot skill from the psyb0t marketplace after the release that contains it. The skill tells an agent how to deploy the Docker image, choose Laya or Von, submit TypeSafe decisions, read probabilities, use direct MCP, and use the stdio bridge only when its client needs one.
+
+```bash
+claude plugin marketplace add psyb0t/agents
+claude plugin install decidealot@psyb0t
+
+codex plugin marketplace add psyb0t/agents
+codex plugin add decidealot@psyb0t
+```
+
+OpenClaw can install the skill or its stdio bridge. The bridge connects to a Decidealot container you already run. It does not start Docker or download models itself.
+
+```bash
+openclaw skills install @psyb0t/decidealot
+openclaw plugins install clawhub:@psyb0t/decidealot
+```
 
 ## Docs
 

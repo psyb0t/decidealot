@@ -7,13 +7,15 @@ from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
 from fastapi import Request, Response
+from starlette.datastructures import Headers
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from decidealot.constants import (
     BEARER_PREFIX,
     ERROR_CODE_REQUEST_TOO_LARGE,
+    ERROR_CODE_UNAUTHORIZED,
     MAX_REQUEST_ID_LENGTH,
     REQUEST_ID_HEADER,
 )
@@ -50,6 +52,35 @@ def require_bearer_token(authorization: str | None, configured_api_key: str | No
     if not hmac.compare_digest(supplied_token.encode(), configured_api_key.encode()):
         logger.warning("request authentication failed", extra={"reason": "wrong_bearer"})
         raise UnauthorizedError("a valid bearer token is required")
+
+
+class BearerASGI:
+    """Apply Decidealot's optional bearer authentication to a raw ASGI app."""
+
+    def __init__(self, app: ASGIApp, configured_api_key: str | None) -> None:
+        self._app = app
+        self._configured_api_key = configured_api_key
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        try:
+            require_bearer_token(
+                Headers(scope=scope).get("Authorization"), self._configured_api_key
+            )
+        except UnauthorizedError as error:
+            await JSONResponse(
+                status_code=401,
+                content={
+                    "code": ERROR_CODE_UNAUTHORIZED,
+                    "message": str(error),
+                    "details": {},
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )(scope, receive, send)
+            return
+        await self._app(scope, receive, send)
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):

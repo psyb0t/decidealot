@@ -1,0 +1,43 @@
+{
+  "name": "@psyb0t/decidealot",
+  "id": "@psyb0t/decidealot",
+  "version": "0.0.0",
+  "type": "code-plugin",
+  "summary": "Connect an OpenClaw agent to local Laya and Von typed decisions over MCP.",
+  "description": "A thin stdio to HTTP bridge for a self-hosted Decidealot MCP endpoint. It forwards typed choice, score, and true or false decision calls to a Decidealot container that the user already runs.",
+  "extensions": [
+    "./bin/cli.js"
+  ],
+  "compat": {
+    "pluginApi": ">=2026.3.24-beta.2"
+  },
+  "build": {
+    "openclawVersion": "2026.3.24-beta.2"
+  },
+  "environment": {
+    "DECIDEALOT_URL": {
+      "required": true,
+      "description": "Base URL of the user's running Decidealot instance. The bridge appends /mcp."
+    },
+    "DECIDEALOT_API_KEY": {
+      "required": false,
+      "description": "Bearer token when the Decidealot container has DECIDEALOT_API_KEY configured."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "required": [
+      "url"
+    ],
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Base URL of the user's running Decidealot instance. The bridge appends /mcp."
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Bearer token when the Decidealot container has DECIDEALOT_API_KEY configured."
+      }
+    }
+  }
+}

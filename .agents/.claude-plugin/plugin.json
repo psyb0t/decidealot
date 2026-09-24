@@ -1,0 +1,17 @@
+{
+  "name": "decidealot",
+  "description": "Run local Laya and Von typed decisions through the Decidealot REST or MCP API.",
+  "author": {
+    "name": "psyb0t",
+    "url": "https://github.com/psyb0t"
+  },
+  "homepage": "https://github.com/psyb0t/decidealot",
+  "license": "WTFPL",
+  "keywords": [
+    "local-ai",
+    "classification",
+    "scoring",
+    "decision-models",
+    "mcp"
+  ]
+}

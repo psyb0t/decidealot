@@ -1,0 +1,36 @@
+{
+  "name": "decidealot",
+  "version": "0.3.0",
+  "description": "Run local Laya and Von typed decisions through the Decidealot REST or MCP API.",
+  "author": {
+    "name": "psyb0t",
+    "url": "https://github.com/psyb0t"
+  },
+  "homepage": "https://github.com/psyb0t/decidealot",
+  "repository": "https://github.com/psyb0t/decidealot",
+  "license": "WTFPL",
+  "interface": {
+    "displayName": "Decidealot",
+    "shortDescription": "Local typed decisions",
+    "longDescription": "Run local Laya and Von models for TypeSafe-compatible choices, scores, and true or false decisions through REST or MCP.",
+    "developerName": "psyb0t",
+    "category": "Developer Tools",
+    "capabilities": [
+      "MCP Streamable HTTP",
+      "REST API",
+      "Typed choice decisions",
+      "Typed score decisions",
+      "Typed true or false decisions"
+    ],
+    "websiteURL": "https://github.com/psyb0t/decidealot",
+    "defaultPrompt": "Use Decidealot to evaluate the supplied state with the specified local model, then report the typed answer and its probabilities without taking an external action."
+  },
+  "keywords": [
+    "local-ai",
+    "classification",
+    "scoring",
+    "decision-models",
+    "mcp"
+  ],
+  "skills": "./skills/"
+}

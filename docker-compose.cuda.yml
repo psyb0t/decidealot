@@ -5,6 +5,9 @@ services:
       dockerfile: Dockerfile.cuda
     image: psyb0t/decidealot:local-cuda
     gpus: all
+    tmpfs:
+      # Triton loads CUDA helpers compiled at runtime from this cache.
+      - /var/cache:rw,exec,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=0755
     environment:
       DECIDEALOT_DEVICE: cuda
       DECIDEALOT_IMAGE_VARIANT: cuda

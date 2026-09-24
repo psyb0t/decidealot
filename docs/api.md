@@ -22,7 +22,7 @@ curl --fail --show-error "$base_url/health"
 
 ## Authentication
 
-Authentication is off unless the container has `DECIDEALOT_API_KEY`. When it is set, every public API call except `/health` needs this header:
+Authentication is off unless the container has `DECIDEALOT_API_KEY`. When it is set, every public HTTP API or MCP request except `/health` needs this header:
 
 ```bash
 auth_header="Authorization: Bearer $DECIDEALOT_API_KEY"
@@ -38,6 +38,58 @@ Missing or wrong credentials return `401`:
   "details": {}
 }
 ```
+
+## MCP Streamable HTTP
+
+The container also exposes version 2 MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. Use `/mcp` exactly. It does not redirect to a trailing slash. It uses the same provider supervisor, public model aliases, request validation, body limit, Bearer authentication, and request ID rules as the TypeSafe HTTP endpoints.
+
+MCP clients differ in configuration syntax, but they need one Streamable HTTP server URL and the same optional Bearer header:
+
+```json
+{
+  "mcpServers": {
+    "decidealot": {
+      "url": "http://127.0.0.1:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer your-token-here"
+      }
+    }
+  }
+}
+```
+
+When authentication is disabled, omit `headers`. When it is enabled, an absent or wrong token gets the normal HTTP `401` envelope before an MCP session starts.
+
+| Tool | Input | Structured output |
+| --- | --- | --- |
+| `system_one` | Required `model`, `state`, and `questions`, exactly as described in [Make decisions](#make-decisions). | The same `model`, `answers`, and `usage` object returned by `POST /v1/systemone`. |
+| `list_models` | None. | The same `{ "models": [...] }` catalog returned by `GET /v1/models`. |
+| `unload_models` | None. | The same unload status and provider list returned by `POST /v1/models/unload`. |
+
+For a `system_one` call, use this MCP tool argument shape. The `questions` value has the same `choice`, `score`, and `noul` rules as the HTTP endpoint.
+
+```json
+{
+  "model": "laya-typed-decisions",
+  "state": {
+    "operation": "delete",
+    "reversible": false
+  },
+  "questions": {
+    "handling": {
+      "type": "choice",
+      "criteria": {
+        "allow": "The operation is reversible and authorized.",
+        "review": "A human must review the operation first."
+      }
+    }
+  }
+}
+```
+
+Call `list_models` and `unload_models` with an empty argument object, `{}`. MCP clients perform initialization and retain the `Mcp-Session-Id` themselves. Do not turn an MCP tool call into a hand-built sequence of raw HTTP requests unless you are implementing an MCP client.
+
+MCP tool validation, unknown model, provider busy, and provider unavailable failures return `isError: true`. A `system_one` validation error includes the TypeSafe `{"detail":[...]}` body in its text content. No tool accepts a provider URL, executable, filesystem path, model directory, or arbitrary runtime option.
 
 ## List selectable models
 

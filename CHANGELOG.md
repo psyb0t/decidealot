@@ -2,6 +2,19 @@
 
 All notable changes per release. Versions follow [SemVer](https://semver.org/). Before 1.0, compatible additions use a minor version and fixes use a patch version. Breaking API or configuration changes are called out.
 
+## v0.3.0
+
+Added:
+
+- Added MCP Streamable HTTP at `/mcp` with `system_one`, `list_models`, and `unload_models` tools. MCP shares the TypeSafe request contract, model supervisor, body limit, request ID handling, and optional Bearer authentication with REST.
+- Added a distributable MCP registry manifest, an OCI registry identity label in both CPU and CUDA images, and tag-gated MCP registry publishing.
+- Added Claude, Codex, and OpenClaw agent integrations that explain Docker deployment, typed decisions, MCP connection, and safe use of probability-bearing results.
+- Added tag-gated ClawHub publishing for the Decidealot skill and OpenClaw stdio bridge.
+
+Fixed:
+
+- Fixed CUDA inference under the hardened runtime by providing Triton's required compiler, Python headers, and narrow executable cache mount.
+
 ## v0.2.0
 
 Breaking changes:

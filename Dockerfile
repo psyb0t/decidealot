@@ -47,11 +47,14 @@ FROM python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    HOME=/tmp \
     PATH=/opt/app-venv/bin:$PATH \
     DECIDEALOT_DEVICE=cpu \
     DECIDEALOT_IMAGE_VARIANT=cpu \
     DECIDEALOT_LOG_FILE=/tmp/decidealot.log \
     TZ=UTC
+
+LABEL io.modelcontextprotocol.server.name="io.github.psyb0t/decidealot"
 
 RUN groupadd --gid 10001 decidealot \
     && useradd --uid 10001 --gid decidealot --no-create-home --shell /usr/sbin/nologin decidealot \

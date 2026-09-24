@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.psyb0t/decidealot",
+  "title": "Decidealot",
+  "description": "Local Laya and Von typed decisions over TypeSafe-compatible MCP.",
+  "version": "0.0.0",
+  "repository": {
+    "url": "https://github.com/psyb0t/decidealot",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "docker.io/psyb0t/decidealot:latest",
+      "runtimeHint": "docker",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:8080/mcp"
+      }
+    }
+  ]
+}

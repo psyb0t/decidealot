@@ -10,7 +10,7 @@ UID := $(shell id -u)
 GID := $(shell id -g)
 DOCKER_SOCK := /var/run/docker.sock
 DOCKER_GID := $(shell stat -c '%g' $(DOCKER_SOCK) 2>/dev/null || echo 0)
-DEPENDENCY_CUTOFF := 2026-09-16T13:10:08Z
+DEPENDENCY_CUTOFF := 2026-09-16T22:52:02Z
 MODEL_EXCEPTION_CUTOFF := 2026-09-23T13:10:08Z
 
 DEV_RUN := docker run --rm --init --user $(UID):$(GID) -e HOME=/tmp \
@@ -23,7 +23,7 @@ DEV_RUN_DIND := docker run --rm --init --user $(UID):$(GID) \
 	-v $(CURDIR):$(CURDIR) -w $(CURDIR) \
 	-v $(DOCKER_SOCK):$(DOCKER_SOCK) $(DEV_IMAGE)
 
-.PHONY: help dev-image dev-tools-image shell pkg-lock model-lock dep format lint lint-fix audit sec test test-unit test-integration test-coverage test-real test-real-cuda generate build build-cuda build-all build-test build-test-cuda run run-cuda restart restart-cuda stop status audit-compose audit-compose-cuda version clean
+.PHONY: help dev-image dev-tools-image shell pkg-lock pkg-add pkg-update pkg-upgrade pkg-remove model-lock dep format lint lint-fix audit sec test test-unit test-integration test-coverage test-real test-real-cuda generate build build-cuda build-all build-test build-test-cuda run run-cuda restart restart-cuda stop status audit-compose audit-compose-cuda version clean
 
 help: ## List supported operations
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -40,6 +40,23 @@ shell: dev-image ## Open an interactive development shell
 pkg-lock: dev-tools-image ## Regenerate the age-gated application dependency lock
 	$(DEV_TOOL_RUN) bash -ceu 'uv lock --exclude-newer $(DEPENDENCY_CUTOFF)'
 
+pkg-add: dev-tools-image ## Add one exact application dependency with PKG=name==version
+	test -n "$(PKG)"
+	case "$(PKG)" in *==*) ;; *) echo "PKG must pin an exact version with ==" >&2; exit 2;; esac
+	$(DEV_TOOL_RUN) bash -ceu 'uv add --no-sync --exclude-newer $(DEPENDENCY_CUTOFF) "$(PKG)"'
+
+pkg-update: dev-tools-image ## Update one application dependency with PKG=name==version
+	test -n "$(PKG)"
+	case "$(PKG)" in *==*) ;; *) echo "PKG must pin an exact version with ==" >&2; exit 2;; esac
+	$(DEV_TOOL_RUN) bash -ceu 'uv lock --exclude-newer $(DEPENDENCY_CUTOFF) --upgrade-package "$(PKG)"'
+
+pkg-upgrade: dev-tools-image ## Upgrade every application dependency under the age gate
+	$(DEV_TOOL_RUN) bash -ceu 'uv lock --exclude-newer $(DEPENDENCY_CUTOFF) --upgrade'
+
+pkg-remove: dev-tools-image ## Remove one application dependency with PKG=name
+	test -n "$(PKG)"
+	$(DEV_TOOL_RUN) bash -ceu 'uv remove --no-sync --exclude-newer $(DEPENDENCY_CUTOFF) "$(PKG)"'
+
 model-lock: dev-tools-image ## Generate hash-locked CPU and CUDA model dependency files
 	$(DEV_TOOL_RUN) bash -ceu 'uv pip compile requirements-laya-cpu.in --output-file requirements-laya-cpu.txt --generate-hashes --quiet --torch-backend cpu --exclude-newer $(DEPENDENCY_CUTOFF) --exclude-newer-package laya=$(MODEL_EXCEPTION_CUTOFF)'
 	$(DEV_TOOL_RUN) bash -ceu 'uv pip compile requirements-von-cpu.in --output-file requirements-von-cpu.txt --generate-hashes --quiet --torch-backend cpu --exclude-newer $(DEPENDENCY_CUTOFF) --exclude-newer-package von-sdk=$(MODEL_EXCEPTION_CUTOFF)'
@@ -52,7 +69,7 @@ format: dev-image ## Format source
 	$(DEV_RUN) python -m ruff format src tests scripts
 
 lint: dev-image ## Run all static checks
-	$(DEV_RUN) bash -ceu 'python -m ruff check src tests scripts && python -m pyright && python -m mypy src tests && python -m bandit -q -r src && shellcheck scripts/*.sh'
+	$(DEV_RUN) bash -ceu 'python -m ruff check src tests scripts && python -m pyright && python -m mypy src tests && python -m bandit -q -r src && shellcheck scripts/*.sh tests/integration/*.sh'
 
 lint-fix: format ## Apply safe formatter fixes
 	@$(MAKE) lint
@@ -68,11 +85,11 @@ test-integration: dev-image ## Run local provider-process integration tests
 test-coverage: dev-image ## Enforce coverage and write the badge input
 	$(DEV_RUN) bash -ceu 'COVERAGE_MINIMUM="$(MIN_TEST_COVERAGE)" bash scripts/test-coverage.sh'
 
-test-real: build dev-image ## Run requests against downloaded CPU Laya and Von weights
-	$(DEV_RUN_DIND) bash scripts/test-real.sh
+test-real: build ## Run real HTTP requests against downloaded CPU Laya and Von weights
+	bash tests/integration/e2e_local_models.sh
 
-test-real-cuda: build-cuda dev-image ## Run requests against downloaded CUDA Laya and Von weights
-	$(DEV_RUN_DIND) bash scripts/test-real.sh --cuda
+test-real-cuda: build-cuda ## Run real HTTP requests against downloaded CUDA Laya and Von weights
+	bash tests/integration/e2e_local_models.sh --cuda
 
 generate: dev-image ## Regenerate every owned artifact
 	$(DEV_RUN) python scripts/generate.py
@@ -85,11 +102,11 @@ build-cuda: ## Build the CUDA production image
 
 build-all: build build-cuda ## Build both production images
 
-build-test: build ## Import the CPU image and verify its immutable variant metadata
-	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --entrypoint python $(CPU_IMAGE):local -c 'from decidealot.settings import Settings; assert Settings().image_variant == "cpu"'
+build-test: build ## Import the CPU image and verify its immutable runtime metadata
+	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --entrypoint python $(CPU_IMAGE):local -c 'import os; from decidealot.settings import Settings; assert Settings().image_variant == "cpu"; assert os.environ["HOME"] == "/tmp"'
 
-build-test-cuda: build-cuda ## Import the CUDA image and verify its immutable variant metadata
-	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --entrypoint python $(CUDA_IMAGE):local-cuda -c 'from decidealot.settings import Settings; assert Settings().image_variant == "cuda"'
+build-test-cuda: build-cuda ## Import the CUDA image and verify its immutable runtime metadata
+	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --tmpfs /var/cache:rw,exec,nosuid,nodev,size=8m,uid=10001,gid=10001,mode=0755 --entrypoint python $(CUDA_IMAGE):local-cuda -c 'import os, shutil; from decidealot.settings import Settings; assert Settings().image_variant == "cuda"; assert os.environ["HOME"] == "/tmp"; assert os.environ["TRITON_CACHE_DIR"] == "/var/cache/triton"; assert os.access("/var/cache", os.W_OK); assert shutil.which("cc"); assert os.path.isfile("/usr/include/python3.12/Python.h")'
 
 run: build ## Build and start the local hardened Compose service
 	docker compose up -d
