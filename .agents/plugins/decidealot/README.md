@@ -2,7 +2,7 @@
 
 This bridge lets a stdio-only MCP client reach a self-hosted [Decidealot](https://github.com/psyb0t/decidealot) container. Decidealot already serves Streamable HTTP at `/mcp`. The bridge uses `mcp-remote` to forward stdio traffic to that endpoint and attach the optional Bearer token.
 
-It does not ship Laya or Von, start Docker, choose a model, or act on a decision. Run Decidealot first, then point the bridge at it.
+Run Decidealot first, then point the bridge at it. The bridge forwards stdio traffic to the running service.
 
 ## Configuration
 
@@ -23,7 +23,7 @@ The service exposes `system_one`, `list_models`, and `unload_models`. `system_on
 
 ## Native remote MCP
 
-If a client supports remote Streamable HTTP directly, skip this bridge and connect to `$DECIDEALOT_URL/mcp`. Add `Authorization: Bearer <token>` only when the server requires it. The endpoint is loopback-only, so use it from the same host or through a tunnel that preserves a loopback `Host` header. Do not route it through a reverse proxy.
+If a client supports remote Streamable HTTP directly, connect it to `$DECIDEALOT_URL/mcp`. Add `Authorization: Bearer <token>` when the server requires it. MCP accepts loopback `Host` headers, so connect from the same host or through a loopback-preserving tunnel.
 
 ## License
 

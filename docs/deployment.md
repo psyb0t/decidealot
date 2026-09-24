@@ -18,7 +18,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.3.0
+  psyb0t/decidealot:v0.3.1
 ```
 
 On a fresh directory Decidealot downloads and verifies Laya and Von before `/health` returns `200`. This can take minutes. It keeps neither model nor Torch loaded after preparation. Later starts verify the existing bundles and download only missing files.
@@ -34,7 +34,7 @@ Pass configuration with Docker `--env-file` or your container manager. The image
 | `DECIDEALOT_MAX_REQUEST_BYTES` | `1048576` | Maximum JSON request size. |
 | `DECIDEALOT_LOG_LEVEL` | `INFO` | Structured log threshold. |
 
-The mounted host directory must be writable by UID and GID `10001`. Decidealot creates its fixed `laya` and `von` subdirectories under `/models`. Do not mount `/`, `/home`, `/root`, a Docker socket, or a broad parent directory.
+The mounted host directory must be writable by UID and GID `10001`. Decidealot creates its fixed `laya` and `von` subdirectories under `/models`. Mount only the directory reserved for model bundles.
 
 ## CUDA deployment
 
@@ -54,10 +54,10 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.3.0-cuda
+  psyb0t/decidealot:v0.3.1-cuda
 ```
 
-The CUDA runtime needs `/var/cache` because Triton compiles and loads short-lived CUDA helpers there. That narrow mount is writable and executable for UID and GID `10001`, while the rest of the container remains read-only and `noexec`. The CUDA image intentionally retains GCC and Python headers because Triton compiles those helpers during real model work. The image chooses its own CPU or CUDA runtime. Do not set a device or model-directory environment variable. A CPU or CUDA mismatch fails before provider startup instead of pretending to work.
+The CUDA runtime needs `/var/cache` because Triton compiles and loads short-lived CUDA helpers there. That narrow mount is writable and executable for UID and GID `10001`, while the rest of the container remains read-only and `noexec`. The CUDA image retains GCC and Python headers for those helpers. The CPU and CUDA images each select their own runtime and use the fixed `/models` path.
 
 ## Compose
 
@@ -71,7 +71,7 @@ sudo install --directory --owner=10001 --group=10001 "$model_directory"
 docker compose up --detach
 ```
 
-`DECIDEALOT_MODEL_DIRECTORY` belongs to Compose only. It names the host directory that Compose bind-mounts at `/models`. Decidealot does not read it. A cold start remains unhealthy until both model bundles are present and verified.
+`DECIDEALOT_MODEL_DIRECTORY` is a Compose variable. It names the host directory that Compose bind-mounts at `/models`. Decidealot uses the fixed container path. A cold start becomes healthy after both model bundles are present and verified.
 
 For CUDA, use the same `.env` file and apply the CUDA override. It builds the local CUDA image, grants the service GPU access, and adds only the writable executable Triton cache that CUDA needs.
 
@@ -90,18 +90,18 @@ curl --fail --show-error http://127.0.0.1:8080/v1/models \
   --header "Authorization: Bearer $DECIDEALOT_API_KEY"
 ```
 
-Use TLS at the edge. Do not expose an unauthenticated model API to the internet.
+Use TLS and `DECIDEALOT_API_KEY` when you expose the API beyond the local host.
 
-MCP is intentionally loopback-only in this release. The v2 transport keeps its DNS rebinding defense and rejects non-loopback `Host` headers. Use a local MCP client or a loopback-preserving tunnel. Do not put `/mcp` behind a reverse proxy until Decidealot has an explicit trusted-host configuration for that deployment.
+MCP currently accepts loopback `Host` headers. Use a local MCP client or a loopback-preserving tunnel. This keeps the v2 transport's DNS rebinding defense in place.
 
 ## Lifecycle and upgrades
 
 The service keeps at most one provider resident. A request for another model waits for the active request, releases the old model and Torch runtime, then starts the selected provider. `POST /v1/models/unload` is the only public unload endpoint. It is idempotent and returns `409` without unloading anything while a provider has an active decision request.
 
-Use a versioned image tag for upgrades. Pull it, recreate the container with the same model directory and configuration file, then check `/health`. Do not replace the model directory unless you want to download model files again.
+Use a versioned image tag for upgrades. Pull it, recreate the container with the same model directory and configuration file, then check `/health`. Keep the model directory to reuse downloaded bundles.
 
 ```bash
-docker pull psyb0t/decidealot:v0.3.0
+docker pull psyb0t/decidealot:v0.3.1
 docker stop decidealot
 docker rm decidealot
 ```

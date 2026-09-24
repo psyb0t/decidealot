@@ -1,6 +1,6 @@
 # Run and connect to Decidealot
 
-Decidealot ships as the `psyb0t/decidealot` Docker image. It downloads its pinned Laya and Von bundles during startup into the host directory mounted at `/models`. Do not build from source unless the user explicitly asks for development work.
+Decidealot ships as the `psyb0t/decidealot` Docker image. It downloads its pinned Laya and Von bundles during startup into the host directory mounted at `/models`. Build from source only for development work.
 
 ## Start the CPU image
 
@@ -68,7 +68,7 @@ Use `GET /v1/models` to learn the available Laya and Von aliases. Use `POST /v1/
 
 ## MCP
 
-Connect an MCP client to `http://127.0.0.1:8080/mcp`. Use `/mcp` exactly. It does not redirect to a trailing slash.
+Connect an MCP client to `http://127.0.0.1:8080/mcp`.
 
 ```json
 {
@@ -83,9 +83,9 @@ Connect an MCP client to `http://127.0.0.1:8080/mcp`. Use `/mcp` exactly. It doe
 }
 ```
 
-The available tools are `system_one`, `list_models`, and `unload_models`. `system_one` takes the same `model`, `state`, and `questions` object as REST and returns the same structured result. `list_models` and `unload_models` take `{}`. The MCP client owns the protocol initialization and session header. Do not hand-build raw MCP HTTP calls for routine work.
+The available tools are `system_one`, `list_models`, and `unload_models`. `system_one` takes the same `model`, `state`, and `questions` object as REST and returns the same structured result. `list_models` and `unload_models` take `{}`. The MCP client owns protocol initialization and the session header.
 
-MCP is loopback-only. Connect a client on the same host, or use a tunnel that preserves a loopback `Host` header. Do not send `/mcp` through a reverse proxy. The full tool contract and error behavior are in [MCP Streamable HTTP](https://github.com/psyb0t/decidealot/blob/main/docs/api.md#mcp-streamable-http).
+MCP accepts loopback `Host` headers. Connect a client on the same host, or use a tunnel that preserves a loopback `Host` header. The full tool contract and error behavior are in [MCP Streamable HTTP](https://github.com/psyb0t/decidealot/blob/main/docs/api.md#mcp-streamable-http).
 
 ## OpenClaw bridge
 
@@ -97,4 +97,4 @@ export DECIDEALOT_URL=http://127.0.0.1:8080
 export DECIDEALOT_API_KEY=your-token-here
 ```
 
-The bridge appends `/mcp`. It never starts Docker or grants the agent direct filesystem or model-directory access.
+The bridge appends `/mcp` and forwards stdio traffic to the running container.

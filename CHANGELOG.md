@@ -2,6 +2,12 @@
 
 All notable changes per release. Versions follow [SemVer](https://semver.org/). Before 1.0, compatible additions use a minor version and fixes use a patch version. Breaking API or configuration changes are called out.
 
+## v0.3.1
+
+Changed:
+
+- Rewrote the README, API guide, deployment guide, and agent setup around local model selection, typed decisions, MCP, model memory, and Docker deployment.
+
 ## v0.3.0
 
 Added:
@@ -19,7 +25,7 @@ Fixed:
 
 Breaking changes:
 
-- Removed `jev` and every `jev-*` alias. Decidealot runs local Laya and Von only, and every decision request now requires an explicit supported `model` selector.
+- Every decision request now names an explicit supported local `model` selector.
 - Removed `POST /v1/models/{model}/unload`. Use idempotent `POST /v1/models/unload` to release the single resident provider.
 - Removed `DECIDEALOT_MODEL_DATA_DIR`, `DECIDEALOT_LAYA_MODEL_DIR`, `DECIDEALOT_VON_MODEL_DIR`, and `DECIDEALOT_DEFAULT_MODEL`. Mount one host directory at the fixed container path `/models` instead.
 

@@ -6,7 +6,7 @@
 [![license](https://raw.githubusercontent.com/psyb0t/decidealot/badges/license.svg)](LICENSE)
 [![Docker Pulls](https://img.shields.io/docker/pulls/psyb0t/decidealot?style=flat-square)](https://hub.docker.com/r/psyb0t/decidealot)
 
-Run Laya and Von decision models on your own machine through the TypeSafe System One HTTP API. No hosted model bill. No response parser held together with duct tape.
+Your hardware. Local decision models. Run Laya and Von through TypeSafe-compatible HTTP or MCP.
 
 At startup Decidealot downloads and verifies both local model bundles. It then loads only the model selected by a request, unloads it after the configured idle period, and returns typed `choice`, `score`, and `noul` answers with model probabilities. It exposes the TypeSafe HTTP API and MCP Streamable HTTP from the same local container.
 
@@ -38,7 +38,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.3.0
+  psyb0t/decidealot:v0.3.1
 ```
 
 Check the service, then ask Laya to make one typed decision:
@@ -68,7 +68,7 @@ The first service startup downloads both pinned model bundles and can take sever
 
 ## Use the API
 
-Send raw state and questions. Do not send a decision you already made and expect Decidealot to repeat it back.
+Send the state to judge and a bounded question. Decidealot returns typed results with probabilities.
 
 | Endpoint | What it does |
 | --- | --- |
@@ -76,13 +76,13 @@ Send raw state and questions. Do not send a decision you already made and expect
 | `GET /v1/models` | Lists every supported alias and the model behind it. |
 | `POST /v1/models/unload` | Stops all providers. |
 | `/mcp` | Version 2 MCP Streamable HTTP, with `system_one`, `list_models`, and `unload_models` tools. |
-| `GET /health` | Confirms that Decidealot can manage providers. It does not load one. |
+| `GET /health` | Reports whether downloaded model bundles are ready. |
 
 `choice` questions need named `criteria`. `score` questions need an ordered criteria array whose position is the score. `noul` questions return a probability between zero and one. [The API guide](docs/api.md) has the request rules, response shape, validation failures, aliases, authentication, and lifecycle behavior.
 
 ## Use MCP
 
-The same container serves MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. There is no second port, separate model lifecycle, or alternate input shape. Use an MCP client that supports Streamable HTTP. The `system_one` tool takes the same required `model`, `state`, and `questions` fields as `POST /v1/systemone`. `list_models` returns the live catalog. `unload_models` releases every idle local runtime.
+The same container serves MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. The `system_one` tool takes the same `model`, `state`, and `questions` fields as `POST /v1/systemone`. `list_models` returns the live catalog. `unload_models` releases local model memory.
 
 Point an MCP client at that exact URL. Its configuration format varies, but the connection values are always equivalent to this:
 
@@ -115,13 +115,13 @@ Every request must name a selector. `GET /v1/models` returns the same catalog at
 
 ### What differs
 
-Laya is one model family with three checkpoints. Its automatic selectors choose the English or multilingual checkpoint from the input script and a language heuristic. That is the sensible default for mixed traffic. Automatic routing does not reliably identify every short Latin-script message, so pin `laya-multilingual` when those messages are known to be non-English. `laya-typed-decisions` is a separate checkpoint for structured decision work. It is not a general upgrade over the other two.
+Laya is one model family with three checkpoints. Its automatic selectors choose English or multilingual checkpoints from the input script and a language heuristic. Use `laya-multilingual` for known non-English short Latin-script messages. `laya-typed-decisions` targets repeated structured decision work.
 
-Von is a separate English-only decision model. It is strongest on short questions with clear criteria. Do not treat it as a long-document legal or policy reasoner. Neither model writes prose or executes an action. Both receive the same TypeSafe `state` and `questions` shape and return typed `choice`, `score`, and `noul` answers with probabilities. Your application owns the threshold and the action that follows.
+Von is a separate English-only decision model for short questions with clear criteria. Both models take the same TypeSafe `state` and `questions` shape and return typed `choice`, `score`, and `noul` answers with probabilities. Your application applies the threshold and action that follow.
 
 Decidealot keeps one provider resident. Moving between Laya selectors stays in the Laya provider. Moving between Laya and Von waits for active work, releases the old provider and its Torch memory, then starts the other one.
 
-Decidealot does not host TypeSafe Jev, so `jev`, `jev-latest`, and other Jev selectors return `422`. By default, an unused provider is also stopped after 600 seconds.
+Set `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` to choose when an idle provider releases its model and Torch memory.
 
 ## Configuration
 
@@ -137,7 +137,7 @@ The container always stores bundles under `/models`. Its only model storage sett
 
 ## CUDA
 
-`psyb0t/decidealot:v0.3.0-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
+`psyb0t/decidealot:v0.3.1-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
 
 ```bash
 docker run --detach --name decidealot --init --restart unless-stopped \
@@ -149,14 +149,14 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.3.0-cuda
+  psyb0t/decidealot:v0.3.1-cuda
 ```
 
 CUDA needs one writable executable cache because Triton compiles and loads short-lived CUDA helpers there. The rest of the container remains read-only and `noexec`. [Deployment](docs/deployment.md) has the complete CPU, CUDA, authentication, persistent-storage, and host-directory recipes.
 
 ## Model storage and unloading
 
-Mount one narrow host directory at `/models`. Decidealot creates and manages `/models/laya` and `/models/von` inside it. Make the host directory writable by the container's fixed UID and GID `10001`. Do not mount your home directory, Docker socket, or a broad host path just to save five minutes.
+Mount one narrow host directory at `/models`. Decidealot creates and manages `/models/laya` and `/models/von` inside it. Make the host directory writable by the container's fixed UID and GID `10001`.
 
 Unload the loaded runtime when you are done with it:
 
@@ -178,7 +178,7 @@ codex plugin marketplace add psyb0t/agents
 codex plugin add decidealot@psyb0t
 ```
 
-OpenClaw can install the skill or its stdio bridge. The bridge connects to a Decidealot container you already run. It does not start Docker or download models itself.
+OpenClaw can install the skill or its stdio bridge. The bridge forwards stdio traffic to a Decidealot container you already run.
 
 ```bash
 openclaw skills install @psyb0t/decidealot

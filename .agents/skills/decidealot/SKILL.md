@@ -17,9 +17,9 @@ user-invocable: true
 
 # Decidealot
 
-Decidealot runs Laya and Von locally. It turns supplied state into typed `choice`, `score`, or `noul` results with probabilities. It does not write prose, take an action, or decide what a probability threshold should trigger.
+Decidealot runs Laya and Von locally. It turns supplied state into typed `choice`, `score`, or `noul` results with probabilities. The caller applies the threshold and any action that follows.
 
-Use a running Decidealot endpoint. Do not clone or build this repository unless the user explicitly asks to develop Decidealot.
+Use a running Decidealot endpoint. Clone or build this repository only for Decidealot development work.
 
 Read [references/setup.md](references/setup.md) before deploying a container or configuring REST, MCP, or the OpenClaw bridge.
 
@@ -28,14 +28,14 @@ Read [references/setup.md](references/setup.md) before deploying a container or 
 - Treat a decision as evidence, not authority. A local model cannot grant permission to delete, send, deploy, trade, or alter external state.
 - Keep authorization, ownership, irreversible-action checks, and final thresholds in the caller. For costly mistakes, route uncertainty to human review.
 - Send user data only to the endpoint the user named. Never search workspace files for `DECIDEALOT_API_KEY` or create an unauthenticated public endpoint.
-- Every decision request needs an explicit local `model` selector. Do not invent `jev`, remote-model, provider URL, model-path, or arbitrary runtime parameters.
+- Every decision request needs an explicit local `model` selector from `GET /v1/models`.
 - `unload_models` evicts the loaded model and Torch runtime. Use it only when the user asks to free memory.
 
 ## When to use
 
 1. Get `DECIDEALOT_URL` from the user or their environment. Default local deployment is `http://127.0.0.1:8080`.
 2. Call `GET /health`, then `GET /v1/models` before choosing a selector you have not already been given.
-3. Put the raw subject in `state`. Define bounded questions in `questions`. Do not send an answer for Decidealot to echo.
+3. Put the raw subject in `state`. Define bounded questions in `questions`.
 4. Read the typed answer and its probabilities. Report them plainly. The caller, not the model, selects the next action.
 5. Use REST for application requests and machine-readable errors. Use MCP at `/mcp` when an MCP client already supports Streamable HTTP. Use the stdio bridge only for a client that cannot connect to remote MCP.
 
@@ -43,7 +43,7 @@ Read [references/setup.md](references/setup.md) before deploying a container or 
 
 ## When not to use
 
-Do not use Decidealot for prose, code generation, open-ended advice, filesystem access, or action execution. Do not use it when the question lacks bounded criteria or an MCP client cannot use Streamable HTTP and the user does not want the optional stdio bridge.
+Use Decidealot for bounded classification, scoring, and true-or-false decisions. Use a language model for prose, code generation, or open-ended advice. Use the OpenClaw bridge when an MCP client needs local stdio.
 
 ## REST and MCP
 

@@ -1,6 +1,6 @@
 # API
 
-Decidealot runs local Laya and Von decision models through the TypeSafe System One HTTP contract. You send the thing that needs judging as `state`, define the allowed answer shape, and get a typed answer back. It does not host TypeSafe Jev and it does not accept Jev model names.
+Decidealot runs local Laya and Von decision models through a TypeSafe-compatible HTTP contract. Send the state to judge and define the allowed answer shape. Decidealot returns typed results with probabilities.
 
 ## Base URL and startup
 
@@ -41,7 +41,7 @@ Missing or wrong credentials return `401`:
 
 ## MCP Streamable HTTP
 
-The container also exposes version 2 MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. Use `/mcp` exactly. It does not redirect to a trailing slash. It uses the same provider supervisor, public model aliases, request validation, body limit, Bearer authentication, and request ID rules as the TypeSafe HTTP endpoints.
+The container also exposes version 2 MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. It shares the provider supervisor, public model aliases, request validation, body limit, Bearer authentication, and request ID rules with the TypeSafe-compatible HTTP endpoints.
 
 MCP clients differ in configuration syntax, but they need one Streamable HTTP server URL and the same optional Bearer header:
 
@@ -87,13 +87,13 @@ For a `system_one` call, use this MCP tool argument shape. The `questions` value
 }
 ```
 
-Call `list_models` and `unload_models` with an empty argument object, `{}`. MCP clients perform initialization and retain the `Mcp-Session-Id` themselves. Do not turn an MCP tool call into a hand-built sequence of raw HTTP requests unless you are implementing an MCP client.
+Call `list_models` and `unload_models` with an empty argument object, `{}`. MCP clients perform initialization and retain the `Mcp-Session-Id`.
 
 MCP tool validation, unknown model, provider busy, and provider unavailable failures return `isError: true`. A `system_one` validation error includes the TypeSafe `{"detail":[...]}` body in its text content. No tool accepts a provider URL, executable, filesystem path, model directory, or arbitrary runtime option.
 
 ## List selectable models
 
-`GET /v1/models` lists every accepted `model` value. Use one of these names in each `POST /v1/systemone` call. There is no default model.
+`GET /v1/models` lists every accepted `model` value. Each `POST /v1/systemone` call names one selector from this catalog.
 
 ```bash
 curl --fail --show-error "$base_url/v1/models" --header "$auth_header"
@@ -275,7 +275,7 @@ curl --fail --show-error "$base_url/v1/systemone" \
 
 ### Noul
 
-Use `noul` for a true or false judgment. The response is the probability that the statement is true. It does not include `choice`, `score`, `confidence`, `legend`, or a per-label probability map.
+Use `noul` for a true or false judgment. The response contains the probability that the statement is true.
 
 ```bash
 curl --fail --show-error "$base_url/v1/systemone" \
@@ -353,9 +353,9 @@ Put as many questions as you need into one `questions` object. Each may use a di
 
 ## Use the probabilities
 
-Decidealot returns the model result. It does not silently allow, deny, filter, or rewrite it. Your caller owns the policy. For example, a caller could allow only an `allow` choice with a probability of at least `0.95`, queue the rest for review, and store the full response beside its own action record.
+Decidealot returns the model result and its probabilities. Your caller applies the policy. For example, it can allow an `allow` choice with a probability of at least `0.95`, queue the rest for review, and store the full response beside its action record.
 
-`choice.confidence` and `score.confidence` are model confidence values. `choice.probabilities` maps each criterion label to its probability. `score.probabilities` maps score positions to their probabilities. `noul` is the probability of true. Do not treat an example threshold as universal. Set it from the cost of being wrong in your workflow.
+`choice.confidence` and `score.confidence` are model confidence values. `choice.probabilities` maps each criterion label to its probability. `score.probabilities` maps score positions to their probabilities. `noul` is the probability of true. Choose thresholds from the cost of being wrong in your workflow.
 
 ## Unload loaded runtimes
 
@@ -386,13 +386,13 @@ curl --fail --show-error --request POST "$base_url/v1/models/unload" \
 
 ## Errors
 
-Malformed System One bodies and unknown model selectors return the TypeSafe-style `422` validation envelope before a provider receives a request. `jev`, `jev-latest`, and every other Jev selector are unknown because Decidealot runs only local Laya and Von models.
+Malformed System One bodies and unsupported model selectors return the TypeSafe-style `422` validation envelope before a provider receives a request.
 
 ```bash
 curl --show-error "$base_url/v1/systemone" \
   --header 'Content-Type: application/json' \
   --header "$auth_header" \
-  --data '{"model":"jev","state":"anything","questions":{"answer":{"type":"noul"}}}'
+  --data '{"model":"unknown-model","state":"anything","questions":{"answer":{"type":"noul"}}}'
 ```
 
 ```json
@@ -400,9 +400,9 @@ curl --show-error "$base_url/v1/systemone" \
   "detail": [
     {
       "loc": ["body", "model"],
-      "msg": "Value error, unknown model 'jev'; use a name returned by GET /v1/models",
+      "msg": "Value error, unknown model 'unknown-model'; use a name returned by GET /v1/models",
       "type": "value_error",
-      "input": "jev"
+      "input": "unknown-model"
     }
   ]
 }
@@ -425,4 +425,4 @@ Failures outside that input contract use Decidealot's envelope:
 }
 ```
 
-The service never accepts a model URL, command, filesystem path, or runtime argument from an API caller. It selects only the fixed local Laya and Von providers named by the model catalog.
+The model catalog restricts API callers to fixed local Laya and Von providers. Each decision request supplies a model alias, state, and questions.
