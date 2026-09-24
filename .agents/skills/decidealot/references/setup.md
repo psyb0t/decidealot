@@ -4,13 +4,16 @@ Decidealot ships as the `psyb0t/decidealot` Docker image. It downloads its pinne
 
 ## Start the CPU image
 
-Choose one narrow host directory for model files. It must be writable by UID and GID `10001` inside the image.
+Choose one narrow host directory for model files. The command passes the current host UID and GID into the container, so a directory created by the current user is writable without image-specific ownership.
 
 ```bash
 model_directory="$HOME/.local/share/decidealot/models"
-sudo install --directory --owner=10001 --group=10001 "$model_directory"
+runtime_uid=$(id -u)
+runtime_gid=$(id -g)
+mkdir --parents "$model_directory"
 
 docker run --detach --name decidealot --init --restart unless-stopped \
+  --user "$runtime_uid:$runtime_gid" \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,noexec,nosuid,size=128m \
   --tmpfs /var/run:rw,noexec,nosuid,size=8m \

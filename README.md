@@ -28,9 +28,12 @@ You need Docker. This starts the CPU image on loopback, stores downloaded model 
 
 ```bash
 model_directory="$HOME/.local/share/decidealot/models"
-sudo install --directory --owner=10001 --group=10001 "$model_directory"
+runtime_uid=$(id -u)
+runtime_gid=$(id -g)
+mkdir --parents "$model_directory"
 
 docker run --detach --name decidealot --init --restart unless-stopped \
+  --user "$runtime_uid:$runtime_gid" \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   --pids-limit 512 --memory 8g --cpus 4 \
   --tmpfs /tmp:rw,noexec,nosuid,size=128m \
@@ -38,7 +41,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.3.1
+  psyb0t/decidealot:v0.4.0
 ```
 
 Check the service, then ask Laya to make one typed decision:
@@ -137,26 +140,32 @@ The container always stores bundles under `/models`. Its only model storage sett
 
 ## CUDA
 
-`psyb0t/decidealot:v0.3.1-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
+`psyb0t/decidealot:v0.4.0-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
 
 ```bash
+model_directory="${model_directory:-$HOME/.local/share/decidealot/models}"
+runtime_uid=$(id -u)
+runtime_gid=$(id -g)
+mkdir --parents "$model_directory"
+
 docker run --detach --name decidealot --init --restart unless-stopped \
+  --user "$runtime_uid:$runtime_gid" \
   --gpus all --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   --pids-limit 512 --memory 8g --cpus 4 \
   --tmpfs /tmp:rw,noexec,nosuid,size=128m \
   --tmpfs /var/run:rw,noexec,nosuid,size=8m \
-  --tmpfs /var/cache:rw,exec,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=0755 \
+  --tmpfs /var/cache:rw,exec,nosuid,nodev,size=512m,uid=$runtime_uid,gid=$runtime_gid,mode=0755 \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.3.1-cuda
+  psyb0t/decidealot:v0.4.0-cuda
 ```
 
 CUDA needs one writable executable cache because Triton compiles and loads short-lived CUDA helpers there. The rest of the container remains read-only and `noexec`. [Deployment](docs/deployment.md) has the complete CPU, CUDA, authentication, persistent-storage, and host-directory recipes.
 
 ## Model storage and unloading
 
-Mount one narrow host directory at `/models`. Decidealot creates and manages `/models/laya` and `/models/von` inside it. Make the host directory writable by the container's fixed UID and GID `10001`.
+Mount one narrow host directory at `/models`. Decidealot creates and manages `/models/laya` and `/models/von` inside it. The Docker commands run as your current host UID and GID, so a directory you create yourself is writable without an image-specific `chown`. The image falls back to non-root `1000:1000` only when no runtime user is supplied.
 
 Unload the loaded runtime when you are done with it:
 

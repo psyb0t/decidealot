@@ -2,6 +2,16 @@
 
 All notable changes per release. Versions follow [SemVer](https://semver.org/). Before 1.0, compatible additions use a minor version and fixes use a patch version. Breaking API or configuration changes are called out.
 
+## v0.4.0
+
+Added:
+
+- Added Docker and Compose runtime user forwarding. Direct Docker commands and Make targets pass the caller's UID and GID, so caller-owned model directories work without image-specific ownership.
+
+Changed:
+
+- CPU and CUDA images now use non-root `1000:1000` only as the fallback when no runtime identity is supplied. CUDA's Triton cache follows the selected runtime identity.
+
 ## v0.3.1
 
 Changed:

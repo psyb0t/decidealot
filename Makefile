@@ -103,22 +103,22 @@ build-cuda: ## Build the CUDA production image
 build-all: build build-cuda ## Build both production images
 
 build-test: build ## Import the CPU image and verify its immutable runtime metadata
-	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --entrypoint python $(CPU_IMAGE):local -c 'import os; from decidealot.settings import Settings; assert Settings().image_variant == "cpu"; assert os.environ["HOME"] == "/tmp"'
+	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --entrypoint python $(CPU_IMAGE):local -c 'import os; from decidealot.settings import Settings; assert Settings().image_variant == "cpu"; assert os.environ["HOME"] == "/tmp"; assert (os.getuid(), os.getgid()) == (1000, 1000)'
 
 build-test-cuda: build-cuda ## Import the CUDA image and verify its immutable runtime metadata
-	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --tmpfs /var/cache:rw,exec,nosuid,nodev,size=8m,uid=10001,gid=10001,mode=0755 --entrypoint python $(CUDA_IMAGE):local-cuda -c 'import os, shutil; from decidealot.settings import Settings; assert Settings().image_variant == "cuda"; assert os.environ["HOME"] == "/tmp"; assert os.environ["TRITON_CACHE_DIR"] == "/var/cache/triton"; assert os.access("/var/cache", os.W_OK); assert shutil.which("cc"); assert os.path.isfile("/usr/include/python3.12/Python.h")'
+	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --tmpfs /var/cache:rw,exec,nosuid,nodev,size=8m,uid=1000,gid=1000,mode=0755 --entrypoint python $(CUDA_IMAGE):local-cuda -c 'import os, shutil; from decidealot.settings import Settings; assert Settings().image_variant == "cuda"; assert os.environ["HOME"] == "/tmp"; assert (os.getuid(), os.getgid()) == (1000, 1000); assert os.environ["TRITON_CACHE_DIR"] == "/var/cache/triton"; assert os.access("/var/cache", os.W_OK); assert shutil.which("cc"); assert os.path.isfile("/usr/include/python3.12/Python.h")'
 
 run: build ## Build and start the local hardened Compose service
-	docker compose up -d
+	DECIDEALOT_UID="$(UID)" DECIDEALOT_GID="$(GID)" docker compose up -d
 
 run-cuda: build-cuda ## Build and start the local CUDA Compose service
-	docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d
+	DECIDEALOT_UID="$(UID)" DECIDEALOT_GID="$(GID)" docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d
 
 restart: ## Rebuild and replace the local compose stack
-	docker compose up -d --build --remove-orphans
+	DECIDEALOT_UID="$(UID)" DECIDEALOT_GID="$(GID)" docker compose up -d --build --remove-orphans
 
 restart-cuda: ## Rebuild and replace the local CUDA Compose service
-	docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d --build --remove-orphans
+	DECIDEALOT_UID="$(UID)" DECIDEALOT_GID="$(GID)" docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d --build --remove-orphans
 
 stop: ## Stop this project's compose stack
 	docker compose down

@@ -56,18 +56,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 LABEL io.modelcontextprotocol.server.name="io.github.psyb0t/decidealot"
 
-RUN groupadd --gid 10001 decidealot \
-    && useradd --uid 10001 --gid decidealot --no-create-home --shell /usr/sbin/nologin decidealot \
-    && mkdir --parents /etc/decidealot /models \
+RUN mkdir --parents /etc/decidealot /models \
     && printf 'cpu\n' > /etc/decidealot/image-variant \
-    && chown decidealot:decidealot /models
+    && chown 1000:1000 /models
 
 COPY --from=application-builder /opt/app-venv /opt/app-venv
 COPY --from=laya-builder /opt/laya-venv /opt/laya-venv
 COPY --from=von-builder /opt/von-venv /opt/von-venv
 COPY src/decidealot/provider_entrypoint.py /opt/decidealot/provider_entrypoint.py
 
-USER decidealot
+USER 1000:1000
 WORKDIR /app
 
 EXPOSE 8080

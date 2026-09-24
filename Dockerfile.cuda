@@ -67,11 +67,9 @@ RUN apt-get update \
         libgomp1 \
         python3.12-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 decidealot \
-    && useradd --uid 10001 --gid decidealot --no-create-home --shell /usr/sbin/nologin decidealot \
     && mkdir --parents /etc/decidealot /models /var/cache/torch-inductor /var/cache/triton \
     && printf 'cuda\n' > /etc/decidealot/image-variant \
-    && chown --recursive decidealot:decidealot /models /var/cache \
+    && chown --recursive 1000:1000 /models /var/cache \
     && ln --symbolic --force /usr/bin/python3.12 /usr/local/bin/python3 \
     && ln --symbolic --force /usr/local/bin/python3 /usr/local/bin/python
 
@@ -80,7 +78,7 @@ COPY --from=laya-builder /opt/laya-venv /opt/laya-venv
 COPY --from=von-builder /opt/von-venv /opt/von-venv
 COPY src/decidealot/provider_entrypoint.py /opt/decidealot/provider_entrypoint.py
 
-USER decidealot
+USER 1000:1000
 WORKDIR /app
 
 EXPOSE 8080

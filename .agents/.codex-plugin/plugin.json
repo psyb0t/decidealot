@@ -1,6 +1,6 @@
 {
   "name": "decidealot",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Run local Laya and Von typed decisions through the Decidealot REST or MCP API.",
   "author": {
     "name": "psyb0t",

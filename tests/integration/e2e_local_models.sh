@@ -27,6 +27,8 @@ readonly healthcheck_attempts=900
 readonly healthcheck_interval_seconds=2
 readonly cpu_image="${DECIDEALOT_TEST_CPU_IMAGE:-psyb0t/decidealot:local}"
 readonly cuda_image="${DECIDEALOT_TEST_CUDA_IMAGE:-psyb0t/decidealot:local-cuda}"
+readonly runtime_uid="${DECIDEALOT_TEST_UID:-$(id -u)}"
+readonly runtime_gid="${DECIDEALOT_TEST_GID:-$(id -g)}"
 
 usage() {
 	printf 'usage: %s [--cuda]\n' "${0##*/}" >&2
@@ -46,9 +48,18 @@ case "$#:${1:-}" in
 	;;
 esac
 
-command -v docker >/dev/null 2>&1 || { log ERROR "docker is not on PATH"; exit 2; }
-command -v curl >/dev/null 2>&1 || { log ERROR "curl is not on PATH"; exit 2; }
-command -v python3 >/dev/null 2>&1 || { log ERROR "python3 is not on PATH"; exit 2; }
+command -v docker >/dev/null 2>&1 || {
+	log ERROR "docker is not on PATH"
+	exit 2
+}
+command -v curl >/dev/null 2>&1 || {
+	log ERROR "curl is not on PATH"
+	exit 2
+}
+command -v python3 >/dev/null 2>&1 || {
+	log ERROR "python3 is not on PATH"
+	exit 2
+}
 
 if [[ "$device" == "cuda" ]]; then
 	docker info --format '{{json .Runtimes}}' | grep --quiet '"nvidia"' || {
@@ -95,6 +106,7 @@ docker_args=(
 	--rm
 	--init
 	--name "$container_name"
+	--user "$runtime_uid:$runtime_gid"
 	--publish "127.0.0.1:$port:8080"
 	--read-only
 	--cap-drop ALL
@@ -102,7 +114,7 @@ docker_args=(
 	--pids-limit 512
 	--tmpfs "/tmp:rw,noexec,nosuid,size=128m"
 	--tmpfs "/var/run:rw,noexec,nosuid,size=8m"
-	--tmpfs "/var/cache:rw,exec,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=0755"
+	--tmpfs "/var/cache:rw,exec,nosuid,nodev,size=512m,uid=$runtime_uid,gid=$runtime_gid,mode=0755"
 	--mount "type=bind,source=$model_directory,target=/models"
 )
 if [[ "$device" == "cuda" ]]; then

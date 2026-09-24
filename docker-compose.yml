@@ -3,6 +3,7 @@ services:
     build:
       context: .
     image: psyb0t/decidealot:local
+    user: "${DECIDEALOT_UID:-1000}:${DECIDEALOT_GID:-1000}"
     init: true
     restart: unless-stopped
     read_only: true
@@ -20,7 +21,7 @@ services:
       DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS: ${DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS:-600}
     volumes:
       - type: bind
-        source: ${DECIDEALOT_MODEL_DIRECTORY:?set DECIDEALOT_MODEL_DIRECTORY to a writable host directory owned by UID and GID 10001}
+        source: ${DECIDEALOT_MODEL_DIRECTORY:?set DECIDEALOT_MODEL_DIRECTORY to a writable host directory}
         target: /models
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
