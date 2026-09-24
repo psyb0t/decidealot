@@ -9,6 +9,7 @@ import httpx
 from fastapi import Body, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from mcp.server.transport_security import TransportSecuritySettings
 
 from decidealot import __version__
 from decidealot.constants import (
@@ -88,6 +89,12 @@ def create_app(
             streamable_http_path=MCP_PATH,
             json_response=True,
             max_request_body_size=resolved_settings.max_request_bytes,
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=list(resolved_settings.mcp_allowed_host_values),
+                allowed_origins=list(resolved_settings.mcp_allowed_origin_values),
+            ),
+            host=resolved_settings.listen_host,
         ),
         configured_api_key,
     )

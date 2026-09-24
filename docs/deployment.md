@@ -21,7 +21,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.4.0
+  psyb0t/decidealot:v0.4.1
 ```
 
 On a fresh directory Decidealot downloads and verifies Laya and Von before `/health` returns `200`. This can take minutes. It keeps neither model nor Torch loaded after preparation. Later starts verify the existing bundles and download only missing files.
@@ -36,6 +36,8 @@ Pass configuration with Docker `--env-file` or your container manager. The image
 | `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` | `600` | Seconds without a request before automatic unload. `0` disables the idle timer. |
 | `DECIDEALOT_MAX_REQUEST_BYTES` | `1048576` | Maximum JSON request size. |
 | `DECIDEALOT_LOG_LEVEL` | `INFO` | Structured log threshold. |
+| `DECIDEALOT_MCP_ALLOWED_HOSTS` | loopback and `decidealot` | Comma-separated MCP `Host` values accepted while DNS rebinding protection stays enabled. |
+| `DECIDEALOT_MCP_ALLOWED_ORIGINS` | loopback HTTP origins | Comma-separated MCP `Origin` values accepted while DNS rebinding protection stays enabled. |
 
 The mounted host directory must be writable by the runtime UID and GID. The Docker commands above pass your current IDs with `--user "$runtime_uid:$runtime_gid"`. Decidealot creates its fixed `laya` and `von` subdirectories under `/models`. The image falls back to non-root `1000:1000` only if a caller does not pass a runtime user. Mount only the directory reserved for model bundles.
 
@@ -60,7 +62,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.4.0-cuda
+  psyb0t/decidealot:v0.4.1-cuda
 ```
 
 The CUDA runtime needs `/var/cache` because Triton compiles and loads short-lived CUDA helpers there. That narrow mount is writable and executable for the runtime UID and GID, while the rest of the container remains read-only and `noexec`. The CUDA image retains GCC and Python headers for those helpers. The CPU and CUDA images each select their own runtime and use the fixed `/models` path.
@@ -98,9 +100,14 @@ curl --fail --show-error http://127.0.0.1:8080/v1/models \
   --header "Authorization: Bearer $DECIDEALOT_API_KEY"
 ```
 
-Use TLS and `DECIDEALOT_API_KEY` when you expose the API beyond the local host.
+Use TLS and `DECIDEALOT_API_KEY` when you expose the API beyond the local host. Keep MCP DNS rebinding protection on by allowlisting the exact reverse-proxy host name, with no scheme, and the browser Origin, with its scheme, when a browser MCP client sends one. Direct loopback clients and another container addressing `decidealot` already match the defaults.
 
-MCP currently accepts loopback `Host` headers. Use a local MCP client or a loopback-preserving tunnel. This keeps the v2 transport's DNS rebinding defense in place.
+```bash
+export DECIDEALOT_MCP_ALLOWED_HOSTS='127.0.0.1,127.0.0.1:*,localhost,localhost:*,[::1],[::1]:*,decidealot,decidealot:*,mcp.example.net'
+export DECIDEALOT_MCP_ALLOWED_ORIGINS='http://127.0.0.1:*,http://localhost:*,http://[::1]:*,https://mcp.example.net'
+```
+
+Pass both values to `docker run` with `--env DECIDEALOT_MCP_ALLOWED_HOSTS --env DECIDEALOT_MCP_ALLOWED_ORIGINS`, or set them in the Compose `.env` file. Do not use a catch-all host or disable the protection. After bearer authentication, an unexpected `Host` returns `421`, and an unexpected browser `Origin` returns `403` before an MCP session exists.
 
 ## Lifecycle and upgrades
 
@@ -109,7 +116,7 @@ The service keeps at most one provider resident. A request for another model wai
 Use a versioned image tag for upgrades. Pull it, recreate the container with the same model directory and configuration file, then check `/health`. Keep the model directory to reuse downloaded bundles.
 
 ```bash
-docker pull psyb0t/decidealot:v0.4.0
+docker pull psyb0t/decidealot:v0.4.1
 docker stop decidealot
 docker rm decidealot
 ```

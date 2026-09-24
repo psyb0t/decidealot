@@ -2,6 +2,16 @@
 
 All notable changes per release. Versions follow [SemVer](https://semver.org/). Before 1.0, compatible additions use a minor version and fixes use a patch version. Breaking API or configuration changes are called out.
 
+## v0.4.1
+
+Fixed:
+
+- Fixed MCP behind a reverse proxy. Operators can allowlist exact `Host` and browser `Origin` values without disabling DNS-rebinding protection.
+
+Changed:
+
+- Reordered final CPU and CUDA image layers so application changes reuse the already-built Laya and Von environments.
+
 ## v0.4.0
 
 Added:

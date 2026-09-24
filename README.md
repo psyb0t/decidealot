@@ -15,6 +15,7 @@ At startup Decidealot downloads and verifies both local model bundles. It then l
 - [Quick start](#quick-start)
 - [Use the API](#use-the-api)
 - [Use MCP](#use-mcp)
+- [Expose MCP through a proxy](#expose-mcp-through-a-proxy)
 - [Pick a model](#pick-a-model)
 - [Configuration](#configuration)
 - [CUDA](#cuda)
@@ -41,7 +42,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.4.0
+  psyb0t/decidealot:v0.4.1
 ```
 
 Check the service, then ask Laya to make one typed decision:
@@ -85,7 +86,7 @@ Send the state to judge and a bounded question. Decidealot returns typed results
 
 ## Use MCP
 
-The same container serves MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. The `system_one` tool takes the same `model`, `state`, and `questions` fields as `POST /v1/systemone`. `list_models` returns the live catalog. `unload_models` releases local model memory.
+The same container serves MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. The `system_one` tool takes the same `model`, `state`, and `questions` fields as `POST /v1/systemone`. `list_models` returns the live catalog. `unload_models` releases local model memory. Direct loopback clients and containers using the `decidealot` Docker service name work by default.
 
 Point an MCP client at that exact URL. Its configuration format varies, but the connection values are always equivalent to this:
 
@@ -103,6 +104,20 @@ Point an MCP client at that exact URL. Its configuration format varies, but the 
 ```
 
 Omit the `Authorization` header only when `DECIDEALOT_API_KEY` is empty. The MCP tools return structured output matching the HTTP result bodies, so an agent can inspect probabilities before it chooses the next action. A client that only supports local stdio can use the optional OpenClaw bridge described in [Agent integrations](#agent-integrations). [The API guide](docs/api.md#mcp-streamable-http) has tool inputs, output shapes, session behavior, and failure behavior.
+
+## Expose MCP through a proxy
+
+The MCP server keeps DNS-rebinding protection enabled. A proxy, tunnel, or public DNS name must be allowed explicitly. Add the exact public `Host` value to `DECIDEALOT_MCP_ALLOWED_HOSTS`. Browser-based MCP clients must also add their exact origin, including the scheme, to `DECIDEALOT_MCP_ALLOWED_ORIGINS`.
+
+For a proxy that publishes `https://mcp.example.net/mcp`, put these values in the Compose `.env` file before `docker compose up -d`, or pass the same variables with `docker run --env`:
+
+```dotenv
+DECIDEALOT_API_KEY=replace-with-a-real-secret
+DECIDEALOT_MCP_ALLOWED_HOSTS=127.0.0.1,127.0.0.1:*,localhost,localhost:*,[::1],[::1]:*,decidealot,decidealot:*,mcp.example.net
+DECIDEALOT_MCP_ALLOWED_ORIGINS=http://127.0.0.1:*,http://localhost:*,http://[::1]:*,https://mcp.example.net
+```
+
+Keep `--publish 127.0.0.1:8080:8080` when a local reverse proxy terminates TLS. The proxy forwards the request unchanged with `Host: mcp.example.net`. After bearer authentication, Decidealot returns `421` for an untrusted host and `403` for an untrusted browser origin. Invalid or missing bearer credentials return `401` first. Do not disable this protection or allow a broad wildcard for an internet-facing endpoint.
 
 ## Pick a model
 
@@ -135,12 +150,14 @@ Pass configuration with `--env-file` or your container manager. The image uses f
 | `DECIDEALOT_API_KEY` | empty | Optional Bearer token for every public API and MCP request. |
 | `DECIDEALOT_MAX_REQUEST_BYTES` | `1048576` | Maximum JSON request body size. |
 | `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` | `600` | Idle time before automatic unload. Set `0` to disable only timeout-based unloads. |
+| `DECIDEALOT_MCP_ALLOWED_HOSTS` | loopback names and `decidealot` | Comma-separated `Host` values accepted by MCP. Add each reverse-proxy hostname here. |
+| `DECIDEALOT_MCP_ALLOWED_ORIGINS` | loopback HTTP origins | Comma-separated browser origins accepted by MCP. Add each public browser origin here. |
 
-The container always stores bundles under `/models`. Its only model storage setting is the host directory mounted there. Keep the loopback bind for one-host use. Before putting Decidealot behind a proxy, tunnel, or public address, set `DECIDEALOT_API_KEY` to a real secret and require `Authorization: Bearer <your-key>` from every caller.
+The container always stores bundles under `/models`. Its only model storage setting is the host directory mounted there. Keep the loopback bind for one-host use. Before putting Decidealot behind a proxy, tunnel, or public address, set `DECIDEALOT_API_KEY` to a real secret, require `Authorization: Bearer <your-key>` from every caller, and configure the precise MCP host and origin allowlists above.
 
 ## CUDA
 
-`psyb0t/decidealot:v0.4.0-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
+`psyb0t/decidealot:v0.4.1-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
 
 ```bash
 model_directory="${model_directory:-$HOME/.local/share/decidealot/models}"
@@ -158,7 +175,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.4.0-cuda
+  psyb0t/decidealot:v0.4.1-cuda
 ```
 
 CUDA needs one writable executable cache because Triton compiles and loads short-lived CUDA helpers there. The rest of the container remains read-only and `noexec`. [Deployment](docs/deployment.md) has the complete CPU, CUDA, authentication, persistent-storage, and host-directory recipes.

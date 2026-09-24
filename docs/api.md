@@ -58,7 +58,7 @@ MCP clients differ in configuration syntax, but they need one Streamable HTTP se
 }
 ```
 
-When authentication is disabled, omit `headers`. When it is enabled, an absent or wrong token gets the normal HTTP `401` envelope before an MCP session starts.
+When authentication is disabled, omit `headers`. When it is enabled, an absent or wrong token gets the normal HTTP `401` envelope before an MCP session starts. MCP DNS rebinding protection remains enabled. Loopback and the `decidealot` Docker service host work by default. Configure `DECIDEALOT_MCP_ALLOWED_HOSTS` with the exact public Host header and `DECIDEALOT_MCP_ALLOWED_ORIGINS` with the exact browser Origin when a reverse proxy exposes this endpoint. After bearer authentication, an unconfigured Host returns `421`; an unconfigured Origin returns `403`.
 
 | Tool | Input | Structured output |
 | --- | --- | --- |

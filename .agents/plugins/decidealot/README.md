@@ -23,7 +23,7 @@ The service exposes `system_one`, `list_models`, and `unload_models`. `system_on
 
 ## Native remote MCP
 
-If a client supports remote Streamable HTTP directly, connect it to `$DECIDEALOT_URL/mcp`. Add `Authorization: Bearer <token>` when the server requires it. MCP accepts loopback `Host` headers, so connect from the same host or through a loopback-preserving tunnel.
+If a client supports remote Streamable HTTP directly, connect it to `$DECIDEALOT_URL/mcp`. Add `Authorization: Bearer <token>` when the server requires it. Loopback clients and the `decidealot` Docker service host work by default. A reverse proxy must set `DECIDEALOT_MCP_ALLOWED_HOSTS` to its exact public Host header and, for browser clients, set `DECIDEALOT_MCP_ALLOWED_ORIGINS` to its exact Origin. The full deployment recipe is in the public deployment guide.
 
 ## License
 

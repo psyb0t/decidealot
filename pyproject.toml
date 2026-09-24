@@ -1,6 +1,6 @@
 [project]
 name = "decidealot"
-version = "0.4.0"
+version = "0.4.1"
 description = "Run local System One decision models behind one TypeSafe-compatible HTTP endpoint."
 readme = "README.md"
 requires-python = ">=3.12"

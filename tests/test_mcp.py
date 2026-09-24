@@ -132,6 +132,110 @@ def test_mcp_streamable_http_lists_tools_and_runs_a_system_one_decision() -> Non
     assert providers[LAYA_PROVIDER_NAME].calls[0][1] == _request_id
 
 
+def test_mcp_accepts_a_configured_proxy_host_and_rejects_other_hosts() -> None:
+    providers = {
+        LAYA_PROVIDER_NAME: FakeProvider(native_system_one_response("laya")),
+        VON_PROVIDER_NAME: FakeProvider(native_system_one_response("von-1.1")),
+    }
+    app = create_embedded_app(
+        Settings(
+            api_key=_operator_api_key,
+            mcp_allowed_hosts="mcp.example.net,mcp.example.net:*",
+            mcp_allowed_origins="https://mcp.example.net",
+        ),
+        providers,
+        LifecycleSupervisor(),
+    )
+
+    with TestClient(app, base_url="http://127.0.0.1:8080", follow_redirects=False) as client:
+        allowed_response = client.post(
+            _mcp_path,
+            headers={
+                **_mcp_headers,
+                **_operator_authorization,
+                "Host": "mcp.example.net",
+                "Origin": "https://mcp.example.net",
+            },
+            json=_initialize_message(),
+        )
+        allowed_session_headers = {
+            **_mcp_headers,
+            **_operator_authorization,
+            "Host": "mcp.example.net",
+            "Origin": "https://mcp.example.net",
+            _mcp_session_id_header: allowed_response.headers[_mcp_session_id_header],
+        }
+        allowed_tools_response = client.post(
+            _mcp_path,
+            headers=allowed_session_headers,
+            json=_mcp_message(_tools_list_method, {}, request_id=2),
+        )
+        wildcard_port_response = client.post(
+            _mcp_path,
+            headers={
+                **_mcp_headers,
+                **_operator_authorization,
+                "Host": "mcp.example.net:443",
+                "Origin": "https://mcp.example.net",
+            },
+            json=_initialize_message(),
+        )
+        rejected_response = client.post(
+            _mcp_path,
+            headers={
+                **_mcp_headers,
+                **_operator_authorization,
+                "Host": "untrusted.example.net",
+            },
+            json=_initialize_message(),
+        )
+        rejected_origin_response = client.post(
+            _mcp_path,
+            headers={
+                **_mcp_headers,
+                **_operator_authorization,
+                "Host": "mcp.example.net",
+                "Origin": "https://untrusted.example.net",
+            },
+            json=_initialize_message(),
+        )
+
+    assert allowed_response.status_code == 200
+    assert _mcp_session_id_header in allowed_response.headers
+    assert allowed_tools_response.status_code == 200
+    tool_names = {
+        tool["name"]
+        for tool in cast(dict[str, Any], allowed_tools_response.json())["result"]["tools"]
+    }
+    assert tool_names == _expected_tool_names
+    assert wildcard_port_response.status_code == 200
+    assert _mcp_session_id_header in wildcard_port_response.headers
+    assert rejected_response.status_code == 421
+    assert rejected_response.text == "Invalid Host header"
+    assert rejected_origin_response.status_code == 403
+    assert rejected_origin_response.text == "Invalid Origin header"
+    assert providers[LAYA_PROVIDER_NAME].calls == []
+    assert providers[VON_PROVIDER_NAME].calls == []
+
+
+def test_mcp_accepts_the_default_docker_service_host() -> None:
+    providers = {
+        LAYA_PROVIDER_NAME: FakeProvider(native_system_one_response("laya")),
+        VON_PROVIDER_NAME: FakeProvider(native_system_one_response("von-1.1")),
+    }
+    app = create_embedded_app(Settings(), providers, LifecycleSupervisor())
+
+    with TestClient(app, base_url="http://127.0.0.1:8080", follow_redirects=False) as client:
+        response = client.post(
+            _mcp_path,
+            headers={**_mcp_headers, "Host": "decidealot:8080"},
+            json=_initialize_message(),
+        )
+
+    assert response.status_code == 200
+    assert _mcp_session_id_header in response.headers
+
+
 def test_mcp_enforces_the_configured_bearer_key_before_creating_a_session() -> None:
     providers = {
         LAYA_PROVIDER_NAME: FakeProvider(native_system_one_response("laya")),

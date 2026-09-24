@@ -88,7 +88,7 @@ Connect an MCP client to `http://127.0.0.1:8080/mcp`.
 
 The available tools are `system_one`, `list_models`, and `unload_models`. `system_one` takes the same `model`, `state`, and `questions` object as REST and returns the same structured result. `list_models` and `unload_models` take `{}`. The MCP client owns protocol initialization and the session header.
 
-MCP accepts loopback `Host` headers. Connect a client on the same host, or use a tunnel that preserves a loopback `Host` header. The full tool contract and error behavior are in [MCP Streamable HTTP](https://github.com/psyb0t/decidealot/blob/main/docs/api.md#mcp-streamable-http).
+MCP accepts loopback clients and the `decidealot` Docker service host by default. For a reverse proxy, set `DECIDEALOT_MCP_ALLOWED_HOSTS` to the exact public Host header. If a browser MCP client sends an Origin, set `DECIDEALOT_MCP_ALLOWED_ORIGINS` to that exact scheme and host. Keep DNS rebinding protection enabled. After bearer authentication, an unknown Host returns `421`; an unknown Origin returns `403`. The full tool contract and deployment examples are in [MCP Streamable HTTP](https://github.com/psyb0t/decidealot/blob/main/docs/api.md#mcp-streamable-http) and [Deployment](https://github.com/psyb0t/decidealot/blob/main/docs/deployment.md#authentication-and-exposure).
 
 ## OpenClaw bridge
 

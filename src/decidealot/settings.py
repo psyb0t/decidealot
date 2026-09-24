@@ -14,6 +14,8 @@ from decidealot.constants import (
     DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_REQUEST_BYTES,
+    DEFAULT_MCP_ALLOWED_HOSTS,
+    DEFAULT_MCP_ALLOWED_ORIGINS,
     DEFAULT_PROVIDER_IDLE_UNLOAD_SECONDS,
     DEFAULT_PROVIDER_START_TIMEOUT_SECONDS,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
@@ -33,6 +35,17 @@ def _absolute_path(value: object) -> Path:
     if not path.is_absolute():
         raise ValueError("must be an absolute path")
     return path
+
+
+def _normalize_allowlist(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("must be a comma-separated allowlist")
+    entries = [entry.strip() for entry in value.split(",")]
+    if not entries or any(not entry for entry in entries):
+        raise ValueError("must be a non-empty comma-separated allowlist")
+    if any("\x00" in entry or len(entry) > 255 for entry in entries):
+        raise ValueError("contains an invalid allowlist entry")
+    return ",".join(entries)
 
 
 AbsolutePath = Annotated[Path, BeforeValidator(_absolute_path)]
@@ -62,6 +75,8 @@ class Settings(BaseSettings):
         le=86_400,
     )
     max_request_bytes: int = Field(default=DEFAULT_MAX_REQUEST_BYTES, ge=1024, le=16_777_216)
+    mcp_allowed_hosts: str = DEFAULT_MCP_ALLOWED_HOSTS
+    mcp_allowed_origins: str = DEFAULT_MCP_ALLOWED_ORIGINS
 
     @field_validator("api_key", mode="before")
     @classmethod
@@ -85,6 +100,11 @@ class Settings(BaseSettings):
     def normalize_log_level(cls, value: object) -> LogLevel:
         return cast(LogLevel, str(value).upper())
 
+    @field_validator("mcp_allowed_hosts", "mcp_allowed_origins", mode="before")
+    @classmethod
+    def normalize_mcp_allowlist(cls, value: object) -> str:
+        return _normalize_allowlist(value)
+
     @model_validator(mode="after")
     def device_matches_image_variant(self) -> "Settings":
         if self.device != self.image_variant:
@@ -93,6 +113,14 @@ class Settings(BaseSettings):
         if installed_image_variant is not None and self.image_variant != installed_image_variant:
             raise ValueError("DECIDEALOT_IMAGE_VARIANT must match the installed image variant")
         return self
+
+    @property
+    def mcp_allowed_host_values(self) -> tuple[str, ...]:
+        return tuple(self.mcp_allowed_hosts.split(","))
+
+    @property
+    def mcp_allowed_origin_values(self) -> tuple[str, ...]:
+        return tuple(self.mcp_allowed_origins.split(","))
 
 
 def _read_installed_image_variant() -> ImageVariant | None:

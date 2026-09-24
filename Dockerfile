@@ -60,9 +60,9 @@ RUN mkdir --parents /etc/decidealot /models \
     && printf 'cpu\n' > /etc/decidealot/image-variant \
     && chown 1000:1000 /models
 
-COPY --from=application-builder /opt/app-venv /opt/app-venv
 COPY --from=laya-builder /opt/laya-venv /opt/laya-venv
 COPY --from=von-builder /opt/von-venv /opt/von-venv
+COPY --from=application-builder /opt/app-venv /opt/app-venv
 COPY src/decidealot/provider_entrypoint.py /opt/decidealot/provider_entrypoint.py
 
 USER 1000:1000
