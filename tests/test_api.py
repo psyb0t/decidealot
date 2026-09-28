@@ -6,7 +6,7 @@ import pytest
 from pydantic import SecretStr
 
 from decidealot.app import create_embedded_app
-from decidealot.constants import LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
+from decidealot.constants import CLM_PROVIDER_NAME, LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
 from decidealot.providers import ProviderResponse
 from decidealot.settings import Settings
 from tests.conftest import (
@@ -97,6 +97,39 @@ def test_health_reports_lifecycle_readiness(client: HTTPClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "providers": ["laya", "von"]}
+
+
+def test_clm_only_configuration_exposes_only_clm_over_the_public_router() -> None:
+    settings = Settings(
+        laya_enabled=False,
+        von_enabled=False,
+        clm_enabled=True,
+        clm_embeddings_url="https://embeddings.example.test/v1/embeddings",
+    )
+    providers = {CLM_PROVIDER_NAME: FakeProvider(native_system_one_response("clm-0.1-8b"))}
+    supervisor = LifecycleSupervisor(provider_names=(CLM_PROVIDER_NAME,))
+    app = create_embedded_app(settings, providers, supervisor)
+
+    with app_client(app) as client:
+        health_response = client.get("/health")
+        models_response = client.get("/v1/models")
+        decision_response = client.post("/v1/systemone", json=system_one_request("clm"))
+        unload_response = client.post("/v1/models/unload")
+
+    assert health_response.json() == {"status": "ok", "providers": ["clm"]}
+    assert [model["name"] for model in models_response.json()["models"]] == [
+        "clm",
+        "clm-latest",
+        "clm-0.1",
+        "clm-0.1-8b",
+    ]
+    assert decision_response.status_code == 200
+    assert decision_response.json()["model"] == "clm-0.1-8b"
+    assert supervisor.acquired_providers == [CLM_PROVIDER_NAME]
+    assert unload_response.json() == {
+        "status": "unloaded",
+        "providers": [{"name": "clm", "wasLoaded": True}],
+    }
 
 
 def test_all_model_unload_is_atomic_when_a_provider_is_busy(

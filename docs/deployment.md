@@ -21,10 +21,10 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.4.1
+  psyb0t/decidealot:latest
 ```
 
-On a fresh directory Decidealot downloads and verifies Laya and Von before `/health` returns `200`. This can take minutes. It keeps neither model nor Torch loaded after preparation. Later starts verify the existing bundles and download only missing files.
+On a fresh directory Decidealot downloads and verifies every enabled provider bundle before `/health` returns `200`. Laya and Von are enabled by default. CLM becomes enabled when its embeddings endpoint is configured. This can take minutes. Decidealot keeps neither model nor Torch loaded after preparation. Later starts verify existing bundles and download only missing files.
 
 ## Configuration
 
@@ -34,12 +34,21 @@ Pass configuration with Docker `--env-file` or your container manager. The image
 | --- | --- | --- |
 | `DECIDEALOT_API_KEY` | empty | Optional Bearer token for every public HTTP API and MCP request except `/health`. |
 | `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` | `600` | Seconds without a request before automatic unload. `0` disables the idle timer. |
+| `DECIDEALOT_LAYA_ENABLED` | `true` | Download and expose Laya selectors. |
+| `DECIDEALOT_VON_ENABLED` | `true` | Download and expose Von selectors. |
+| `DECIDEALOT_CLM_ENABLED` | `auto` | Enable CLM when its embeddings URL is set. Use `true` to require it or `false` to skip it. |
+| `DECIDEALOT_CLM_EMBEDDINGS_URL` | empty | Fixed OpenAI-compatible `/v1/embeddings` URL for CLM. Required when CLM is enabled. |
+| `DECIDEALOT_CLM_EMBEDDINGS_MODEL` | `qwen3-8b` | Model selector sent to the CLM embeddings endpoint. It must return Qwen3-8B last-token vectors with width `4096`. |
+| `DECIDEALOT_CLM_EMBEDDINGS_API_KEY` | empty | Optional Bearer token passed only to the configured CLM embeddings endpoint. |
+| `DECIDEALOT_CLM_EMBEDDINGS_TIMEOUT_SECONDS` | `120` | CLM embeddings request timeout in seconds. |
 | `DECIDEALOT_MAX_REQUEST_BYTES` | `1048576` | Maximum JSON request size. |
 | `DECIDEALOT_LOG_LEVEL` | `INFO` | Structured log threshold. |
 | `DECIDEALOT_MCP_ALLOWED_HOSTS` | loopback and `decidealot` | Comma-separated MCP `Host` values accepted while DNS rebinding protection stays enabled. |
 | `DECIDEALOT_MCP_ALLOWED_ORIGINS` | loopback HTTP origins | Comma-separated MCP `Origin` values accepted while DNS rebinding protection stays enabled. |
 
-The mounted host directory must be writable by the runtime UID and GID. The Docker commands above pass your current IDs with `--user "$runtime_uid:$runtime_gid"`. Decidealot creates its fixed `laya` and `von` subdirectories under `/models`. The image falls back to non-root `1000:1000` only if a caller does not pass a runtime user. Mount only the directory reserved for model bundles.
+The mounted host directory must be writable by the runtime UID and GID. The Docker commands above pass your current IDs with `--user "$runtime_uid:$runtime_gid"`. Decidealot creates `laya`, `von`, and, when enabled, `clm` subdirectories under `/models`. The image falls back to non-root `1000:1000` only if a caller does not pass a runtime user. Mount only the directory reserved for model bundles.
+
+CLM is a local `Contrastive-LM/CLM-v0.1-8B` projection head over one external embeddings service. It sends rendered decision state and criteria to that service. Configure a URL you control or trust. The configured model must emit Qwen3-8B last-token embeddings with exactly 4096 float values. Decidealot rejects any other vector width before the projection head runs.
 
 ## CUDA deployment
 
@@ -62,7 +71,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.4.1-cuda
+  psyb0t/decidealot:latest-cuda
 ```
 
 The CUDA runtime needs `/var/cache` because Triton compiles and loads short-lived CUDA helpers there. That narrow mount is writable and executable for the runtime UID and GID, while the rest of the container remains read-only and `noexec`. The CUDA image retains GCC and Python headers for those helpers. The CPU and CUDA images each select their own runtime and use the fixed `/models` path.
@@ -81,7 +90,7 @@ sudo install --directory --owner="$runtime_uid" --group="$runtime_gid" "$model_d
 DECIDEALOT_UID="$runtime_uid" DECIDEALOT_GID="$runtime_gid" docker compose up --detach
 ```
 
-`DECIDEALOT_MODEL_DIRECTORY` is a Compose variable. It names the host directory that Compose bind-mounts at `/models`. `DECIDEALOT_UID` and `DECIDEALOT_GID` set the container process to your current host identity. They are passed on the command line rather than stored in `.env`, so each caller gets its own identity. Each missing value falls back to `1000`. Decidealot uses the fixed container path. A cold start becomes healthy after both model bundles are present and verified.
+`DECIDEALOT_MODEL_DIRECTORY` is a Compose variable. It names the host directory that Compose bind-mounts at `/models`. `DECIDEALOT_UID` and `DECIDEALOT_GID` set the container process to your current host identity. They are passed on the command line rather than stored in `.env`, so each caller gets its own identity. Each missing value falls back to `1000`. Decidealot uses the fixed container path. A cold start becomes healthy after every enabled bundle is present and verified.
 
 For CUDA, use the same `.env` file and apply the CUDA override. It builds the local CUDA image, grants the service GPU access, and adds only the writable executable Triton cache that CUDA needs.
 
@@ -116,7 +125,7 @@ The service keeps at most one provider resident. A request for another model wai
 Use a versioned image tag for upgrades. Pull it, recreate the container with the same model directory and configuration file, then check `/health`. Keep the model directory to reuse downloaded bundles.
 
 ```bash
-docker pull psyb0t/decidealot:v0.4.1
+docker pull psyb0t/decidealot:latest
 docker stop decidealot
 docker rm decidealot
 ```

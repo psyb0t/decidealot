@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from decidealot.app import create_embedded_app
-from decidealot.constants import LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
+from decidealot.constants import CLM_PROVIDER_NAME, LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
 from decidealot.settings import Settings
 from tests.conftest import (
     FakeProvider,
@@ -313,6 +313,55 @@ def test_mcp_returns_a_typesafe_tool_error_without_calling_a_provider() -> None:
     assert '"loc":["body","model"]' in validation_error
     assert providers[LAYA_PROVIDER_NAME].calls == []
     assert providers[VON_PROVIDER_NAME].calls == []
+
+
+def test_mcp_lists_and_uses_clm_when_it_is_the_only_enabled_provider() -> None:
+    settings = Settings(
+        laya_enabled=False,
+        von_enabled=False,
+        clm_enabled=True,
+        clm_embeddings_url="https://embeddings.example.test/v1/embeddings",
+    )
+    providers = {CLM_PROVIDER_NAME: FakeProvider(native_system_one_response("clm-0.1-8b"))}
+    app = create_embedded_app(
+        settings,
+        providers,
+        LifecycleSupervisor(provider_names=(CLM_PROVIDER_NAME,)),
+    )
+
+    with TestClient(app, base_url="http://127.0.0.1:8080", follow_redirects=False) as client:
+        session_headers = _initialize_session(client)
+        models_response = client.post(
+            _mcp_path,
+            headers=session_headers,
+            json=_mcp_message(
+                _tools_call_method,
+                {"name": "list_models", "arguments": {}},
+                request_id=2,
+            ),
+        )
+        decision_response = client.post(
+            _mcp_path,
+            headers=session_headers,
+            json=_mcp_message(
+                _tools_call_method,
+                {"name": "system_one", "arguments": system_one_request("clm")},
+                request_id=3,
+            ),
+        )
+
+    assert models_response.status_code == 200
+    models_result = cast(dict[str, Any], models_response.json())["result"]
+    assert [model["name"] for model in models_result["structuredContent"]["models"]] == [
+        "clm",
+        "clm-latest",
+        "clm-0.1",
+        "clm-0.1-8b",
+    ]
+    assert decision_response.status_code == 200
+    decision_result = cast(dict[str, Any], decision_response.json())["result"]
+    assert decision_result["structuredContent"]["model"] == "clm-0.1-8b"
+    assert len(providers[CLM_PROVIDER_NAME].calls) == 1
 
 
 def test_mcp_rejects_an_oversized_request_before_provider_forwarding() -> None:

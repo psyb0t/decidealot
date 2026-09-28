@@ -2,9 +2,10 @@
 
 import pytest
 
-from decidealot.constants import LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
+from decidealot.constants import CLM_PROVIDER_NAME, LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
 from decidealot.errors import UnknownModelError
 from decidealot.providers import ModelRouter
+from decidealot.settings import Settings
 
 
 @pytest.mark.parametrize(
@@ -68,3 +69,20 @@ def test_every_catalog_name_resolves_to_a_local_provider() -> None:
     providers = {name: router.resolve(name).provider_name for name in router.supported_models}
 
     assert set(providers.values()) == {LAYA_PROVIDER_NAME, VON_PROVIDER_NAME}
+
+
+def test_model_router_lists_and_resolves_clm_only_when_enabled() -> None:
+    router = ModelRouter(
+        Settings(
+            laya_enabled=False,
+            von_enabled=False,
+            clm_enabled=True,
+            clm_embeddings_url="https://embeddings.example.test/v1/embeddings",
+        )
+    )
+
+    assert router.supported_models == ("clm", "clm-latest", "clm-0.1", "clm-0.1-8b")
+    assert router.resolve("clm").provider_name == CLM_PROVIDER_NAME
+    assert router.resolve("clm-latest").public_model == "clm-0.1-8b"
+    with pytest.raises(UnknownModelError):
+        router.resolve("laya")

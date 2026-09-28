@@ -42,13 +42,18 @@ def app_client(application: FastAPI) -> Generator[HTTPClient, None, None]:
 class LifecycleSupervisor:
     """A lifecycle double that proves router behavior without starting models."""
 
-    def __init__(self, ready_when_started: bool = True) -> None:
+    def __init__(
+        self,
+        ready_when_started: bool = True,
+        provider_names: tuple[str, ...] = (LAYA_PROVIDER_NAME, VON_PROVIDER_NAME),
+    ) -> None:
         self.acquired_providers: list[str] = []
         self.loaded_providers: set[str] = set()
         self.busy = False
         self.started = False
         self.stopped = False
         self.ready_when_started = ready_when_started
+        self.provider_names = provider_names
 
     @property
     def ready(self) -> bool:
@@ -81,7 +86,7 @@ class LifecycleSupervisor:
                 provider_name=provider_name,
                 was_loaded=provider_name in self.loaded_providers,
             )
-            for provider_name in (LAYA_PROVIDER_NAME, VON_PROVIDER_NAME)
+            for provider_name in self.provider_names
         )
         self.loaded_providers.clear()
         return results

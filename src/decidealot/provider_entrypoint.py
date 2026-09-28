@@ -3,12 +3,14 @@
 import logging
 import os
 import sys
+from hashlib import sha256
 from importlib import import_module
 from pathlib import Path
 from typing import Any
 
 _laya_provider = "laya"
 _von_provider = "von"
+_clm_provider = "clm"
 _model_data_directory = Path("/models")
 _prepare_action = "prepare"
 _laya_host_env = "LAYA_HOST"
@@ -43,8 +45,12 @@ _huggingface_hub_module = "huggingface_hub"
 _snapshot_download_name = "snapshot_download"
 _laya_model_repository = "convaiinnovations/laya"
 _von_model_repository = "wfzyx/von"
+_clm_model_repository = "Contrastive-LM/CLM-v0.1-8B"
 _laya_model_revision = "5e7b2b1b8ca2ecdd3f2322d94069c9b6ce7e844b"
 _von_model_revision = "d8bb5e0745d8ee1fb65d536d6d4892d54d5a93fd"
+_clm_model_revision = "e939398d4556fcd9400c76fa8c5a513202f42b0a"
+_clm_model_filename = "CLM_v0.1-8B.pt"
+_clm_model_sha256 = "b2b4a8c9c2d39263eff78a351eb909a342ce9b3bf21a3f07c1d1bf15f1c4eda5"
 _hf_hub_offline_env = "HF_HUB_OFFLINE"
 _transformers_offline_env = "TRANSFORMERS_OFFLINE"
 _offline_enabled = "1"
@@ -63,6 +69,8 @@ _von_model_files = (
     "tokenizer.json",
     "tokenizer_config.json",
 )
+_clm_runtime_module = "clm_runtime"
+_clm_runtime_name = "run_clm"
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +84,7 @@ def import_provider_attribute(module_name: str, attribute_name: str) -> Any:
 def local_model_dir(provider_name: str) -> Path:
     """Return one fixed provider directory under the mounted model root."""
 
-    if provider_name not in {_laya_provider, _von_provider}:
+    if provider_name not in {_laya_provider, _von_provider, _clm_provider}:
         raise RuntimeError(f"unsupported local provider: {provider_name}")
     path = _model_data_directory / provider_name
     try:
@@ -185,6 +193,71 @@ def ensure_von_model(model_dir: Path) -> None:
     require_von_model(model_dir)
 
 
+def clm_checkpoint_path(model_dir: Path) -> Path:
+    """Return the one verified projection-head file needed by CLM."""
+
+    return model_dir / _clm_model_filename
+
+
+def require_clm_checkpoint(model_dir: Path) -> None:
+    """Reject a missing or modified CLM head before it can reach Torch."""
+
+    checkpoint_path = clm_checkpoint_path(model_dir)
+    if not checkpoint_path.is_file():
+        raise RuntimeError("CLM checkpoint is missing")
+    if _file_sha256(checkpoint_path) != _clm_model_sha256:
+        raise RuntimeError("CLM checkpoint digest does not match the pinned release")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = sha256()
+    try:
+        with path.open("rb") as checkpoint:
+            while chunk := checkpoint.read(1_048_576):
+                digest.update(chunk)
+    except OSError as error:
+        raise RuntimeError("read CLM checkpoint") from error
+    return digest.hexdigest()
+
+
+def download_clm_checkpoint(model_dir: Path, force_download: bool) -> None:
+    """Fetch just the pinned CLM head into the configured mounted model directory."""
+
+    if not os.access(model_dir, os.W_OK | os.X_OK):
+        raise RuntimeError("configured model directory must be writable to download missing files")
+    snapshot_download = import_provider_attribute(_huggingface_hub_module, _snapshot_download_name)
+    logger.info(
+        "downloading CLM projection head",
+        extra={"repository": _clm_model_repository, "revision": _clm_model_revision},
+    )
+    try:
+        snapshot_download(
+            repo_id=_clm_model_repository,
+            revision=_clm_model_revision,
+            local_dir=str(model_dir),
+            allow_patterns=(_clm_model_filename,),
+            force_download=force_download,
+        )
+    except Exception as error:  # Hugging Face exposes several transport and cache exception types.
+        logger.error(
+            "CLM projection head download failed",
+            exc_info=error,
+            extra={"repository": _clm_model_repository, "revision": _clm_model_revision},
+        )
+        raise RuntimeError("download pinned CLM projection head") from error
+
+
+def ensure_clm_checkpoint(model_dir: Path) -> Path:
+    """Download a missing or invalid head and verify its exact digest before serving."""
+
+    checkpoint_path = clm_checkpoint_path(model_dir)
+    if checkpoint_path.is_file() and _file_sha256(checkpoint_path) == _clm_model_sha256:
+        return checkpoint_path
+    download_clm_checkpoint(model_dir, force_download=checkpoint_path.is_file())
+    require_clm_checkpoint(model_dir)
+    return checkpoint_path
+
+
 def prepare_laya() -> None:
     """Download or verify Laya without constructing its runtime or importing Torch."""
 
@@ -195,6 +268,12 @@ def prepare_von() -> None:
     """Download or verify Von without constructing its runtime or importing Torch."""
 
     ensure_von_model(local_model_dir(_von_provider))
+
+
+def prepare_clm() -> None:
+    """Download or verify CLM without constructing the Torch runtime."""
+
+    ensure_clm_checkpoint(local_model_dir(_clm_provider))
 
 
 def enable_offline_model_loading() -> None:
@@ -268,6 +347,18 @@ def run_von() -> None:
     )
 
 
+def run_clm() -> None:
+    """Prepare CLM and start its small loopback inference server."""
+
+    checkpoint_path = ensure_clm_checkpoint(local_model_dir(_clm_provider))
+    enable_offline_model_loading()
+    runtime_directory = str(Path(__file__).resolve().parent)
+    if runtime_directory not in sys.path:
+        sys.path.insert(0, runtime_directory)
+    run = import_provider_attribute(_clm_runtime_module, _clm_runtime_name)
+    run(checkpoint_path)
+
+
 def main() -> None:
     """Select the fixed provider entrypoint requested by Decidealot."""
 
@@ -280,6 +371,9 @@ def main() -> None:
         if provider_name == _von_provider:
             run_von()
             return
+        if provider_name == _clm_provider:
+            run_clm()
+            return
         raise SystemExit(f"unsupported local provider: {provider_name}")
     if len(arguments) == 2 and arguments[0] == _prepare_action:
         provider_name = arguments[1]
@@ -288,6 +382,9 @@ def main() -> None:
             return
         if provider_name == _von_provider:
             prepare_von()
+            return
+        if provider_name == _clm_provider:
+            prepare_clm()
             return
         raise SystemExit(f"unsupported local provider: {provider_name}")
     raise SystemExit("expected a provider name or 'prepare <provider>'")

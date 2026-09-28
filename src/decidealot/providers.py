@@ -9,6 +9,8 @@ from typing import Any, Protocol
 import httpx
 
 from decidealot.constants import (
+    CLM_PROVIDER_NAME,
+    CLM_SYSTEMONE_URL,
     LAYA_PROVIDER_NAME,
     LAYA_SYSTEMONE_URL,
     REQUEST_ID_HEADER,
@@ -16,6 +18,7 @@ from decidealot.constants import (
     VON_SYSTEMONE_URL,
 )
 from decidealot.errors import ProviderUnavailableError, UnknownModelError
+from decidealot.settings import Settings
 from decidealot.typesafe import (
     ChoiceQuestion,
     JSONValue,
@@ -33,6 +36,7 @@ logger = logging.getLogger(__name__)
 # 1.1.1 PyPI upload.
 _laya_release_date = "2026-09-23"
 _von_release_date = "2026-09-22"
+_clm_release_date = "2026-09-24"
 _laya_catalog_entries: tuple[tuple[str, str], ...] = (
     ("laya", "Laya System One decisions with automatic checkpoint routing."),
     ("laya-auto", "Alias for laya with automatic checkpoint routing."),
@@ -47,9 +51,16 @@ _von_catalog_entries: tuple[tuple[str, str], ...] = (
     ("von-1.1", "Von 1.1 System One decision model."),
     ("von-1.1.0", "Alias for the Von 1.1 point release."),
 )
+_clm_catalog_entries: tuple[tuple[str, str], ...] = (
+    ("clm", "Contrastive Language Model decisions backed by a configured embeddings endpoint."),
+    ("clm-latest", "Alias for the current CLM checkpoint."),
+    ("clm-0.1", "Alias for CLM v0.1."),
+    ("clm-0.1-8b", "CLM v0.1 decision head paired with Qwen3-8B embeddings."),
+)
 _laya_public_model = "laya"
 _von_public_model = "von-1.1"
 _von_upstream_model = "von-1.1"
+_clm_public_model = "clm-0.1-8b"
 # Laya auto-routes by script and language whenever the request names no checkpoint.
 _laya_auto_selector = ""
 _laya_auto_aliases = frozenset({"laya", "laya-auto", "laya-latest"})
@@ -59,6 +70,7 @@ _laya_checkpoint_selectors: Mapping[str, str] = {
     "laya-typed-decisions": "typed-decisions",
 }
 _von_aliases = frozenset(name for name, _ in _von_catalog_entries)
+_clm_aliases = frozenset(name for name, _ in _clm_catalog_entries)
 _absent_instructions = ""
 _noul_outcomes = ("true", "false")
 
@@ -141,6 +153,9 @@ class HTTPProviderClient:
 class ModelRouter:
     """Resolve public aliases without allowing callers to choose a network target."""
 
+    def __init__(self, settings: Settings | None = None) -> None:
+        self._enabled_provider_names = frozenset((settings or Settings()).enabled_provider_names)
+
     @property
     def supported_models(self) -> tuple[str, ...]:
         return tuple(entry.name for entry in self.catalog())
@@ -149,24 +164,40 @@ class ModelRouter:
         """Describe every accepted selector with the release date of its local model."""
 
         return (
-            *self._metadata(_laya_catalog_entries, _laya_release_date),
-            *self._metadata(_von_catalog_entries, _von_release_date),
+            *self._enabled_metadata(
+                LAYA_PROVIDER_NAME,
+                _laya_catalog_entries,
+                _laya_release_date,
+            ),
+            *self._enabled_metadata(
+                VON_PROVIDER_NAME,
+                _von_catalog_entries,
+                _von_release_date,
+            ),
+            *self._enabled_metadata(
+                CLM_PROVIDER_NAME,
+                _clm_catalog_entries,
+                _clm_release_date,
+            ),
         )
 
     def resolve(self, requested_model: str) -> ModelRoute:
         """Resolve a public model selector to a fixed local backend."""
 
-        if requested_model in _laya_auto_aliases:
+        is_laya_enabled = LAYA_PROVIDER_NAME in self._enabled_provider_names
+        if is_laya_enabled and requested_model in _laya_auto_aliases:
             return self._laya_auto_route()
         checkpoint = _laya_checkpoint_selectors.get(requested_model)
-        if checkpoint is not None:
+        if is_laya_enabled and checkpoint is not None:
             return ModelRoute(
                 provider_name=LAYA_PROVIDER_NAME,
                 public_model=requested_model,
                 upstream_model=checkpoint,
             )
-        if requested_model in _von_aliases:
+        if VON_PROVIDER_NAME in self._enabled_provider_names and requested_model in _von_aliases:
             return self._von_route()
+        if CLM_PROVIDER_NAME in self._enabled_provider_names and requested_model in _clm_aliases:
+            return self._clm_route()
         raise UnknownModelError(f"unsupported model {requested_model!r}")
 
     @staticmethod
@@ -178,6 +209,16 @@ class ModelRouter:
             ModelMetadata(name=name, description=description, release_date=release_date)
             for name, description in entries
         )
+
+    def _enabled_metadata(
+        self,
+        provider_name: str,
+        entries: tuple[tuple[str, str], ...],
+        release_date: str,
+    ) -> tuple[ModelMetadata, ...]:
+        if provider_name not in self._enabled_provider_names:
+            return ()
+        return self._metadata(entries, release_date)
 
     @staticmethod
     def _laya_auto_route() -> ModelRoute:
@@ -193,6 +234,14 @@ class ModelRouter:
             provider_name=VON_PROVIDER_NAME,
             public_model=_von_public_model,
             upstream_model=_von_upstream_model,
+        )
+
+    @staticmethod
+    def _clm_route() -> ModelRoute:
+        return ModelRoute(
+            provider_name=CLM_PROVIDER_NAME,
+            public_model=_clm_public_model,
+            upstream_model=_clm_public_model,
         )
 
 
@@ -266,17 +315,22 @@ def _native_text(value: JSONValue) -> str:
 
 
 def default_provider_clients(
-    timeout_seconds: float,
+    settings: Settings,
 ) -> tuple[dict[str, ProviderClient], httpx.AsyncClient]:
     """Create the app-owned HTTP client and fixed local provider clients."""
 
     client = httpx.AsyncClient(
-        timeout=httpx.Timeout(timeout_seconds),
+        timeout=httpx.Timeout(settings.request_timeout_seconds),
         follow_redirects=False,
         trust_env=False,
     )
+    provider_urls = {
+        LAYA_PROVIDER_NAME: LAYA_SYSTEMONE_URL,
+        VON_PROVIDER_NAME: VON_SYSTEMONE_URL,
+        CLM_PROVIDER_NAME: CLM_SYSTEMONE_URL,
+    }
     providers: dict[str, ProviderClient] = {
-        LAYA_PROVIDER_NAME: HTTPProviderClient(LAYA_PROVIDER_NAME, LAYA_SYSTEMONE_URL, client),
-        VON_PROVIDER_NAME: HTTPProviderClient(VON_PROVIDER_NAME, VON_SYSTEMONE_URL, client),
+        provider_name: HTTPProviderClient(provider_name, provider_urls[provider_name], client)
+        for provider_name in settings.enabled_provider_names
     }
     return providers, client

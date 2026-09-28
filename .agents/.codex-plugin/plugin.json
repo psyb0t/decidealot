@@ -1,7 +1,7 @@
 {
   "name": "decidealot",
-  "version": "0.4.1",
-  "description": "Run local Laya and Von typed decisions through the Decidealot REST or MCP API.",
+  "version": "0.5.0",
+  "description": "Run local Laya, Von, and CLM typed decisions through the Decidealot REST or MCP API.",
   "author": {
     "name": "psyb0t",
     "url": "https://github.com/psyb0t"
@@ -12,7 +12,7 @@
   "interface": {
     "displayName": "Decidealot",
     "shortDescription": "Local typed decisions",
-    "longDescription": "Run local Laya and Von models for TypeSafe-compatible choices, scores, and true or false decisions through REST or MCP.",
+    "longDescription": "Run local Laya, Von, and CLM models for TypeSafe-compatible choices, scores, and true or false decisions through REST or MCP.",
     "developerName": "psyb0t",
     "category": "Developer Tools",
     "capabilities": [

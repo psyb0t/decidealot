@@ -18,7 +18,7 @@ LOOPBACK_HOST = "127.0.0.1"
 HTTP_SCHEME = "http"
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]
 RELEASE_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-TESTED_MODELS = ("laya", "von")
+DEFAULT_TESTED_MODELS = ("laya", "von")
 LISTING_FIELDS = {"models"}
 MODEL_ENTRY_FIELDS = {"name", "description", "release_date"}
 RESPONSE_FIELDS = {"model", "answers", "usage"}
@@ -153,7 +153,19 @@ def native_field_paths(value: JSONValue, path: str) -> list[str]:
     return found
 
 
-def check_model_listing(base_url: str) -> None:
+def tested_models() -> tuple[str, ...]:
+    """Read explicit real-provider selectors without changing the default suite."""
+
+    configured_models = os.environ.get("DECIDEALOT_TESTED_MODELS")
+    if configured_models is None:
+        return DEFAULT_TESTED_MODELS
+    models = tuple(model.strip() for model in configured_models.split(",") if model.strip())
+    if not models:
+        fail("DECIDEALOT_TESTED_MODELS must contain at least one model selector")
+    return models
+
+
+def check_model_listing(base_url: str, models: tuple[str, ...]) -> None:
     listing = require_exact_keys(
         "GET /v1/models",
         request_json(base_url, "GET", "/v1/models", LISTING_TIMEOUT_SECONDS),
@@ -181,7 +193,7 @@ def check_model_listing(base_url: str) -> None:
         names.append(name)
     if len(names) != len(set(names)):
         fail(f"GET /v1/models repeats a model name: {names}")
-    missing_names = sorted(set(TESTED_MODELS) - set(names))
+    missing_names = sorted(set(models) - set(names))
     if missing_names:
         fail(f"GET /v1/models does not list {missing_names}")
     print(json.dumps({"check": "models", "count": len(names)}), flush=True)
@@ -258,8 +270,9 @@ def main() -> None:
     base_url = os.environ.get("DECIDEALOT_BASE_URL")
     if not base_url:
         fail("DECIDEALOT_BASE_URL is required")
-    check_model_listing(base_url)
-    for model in TESTED_MODELS:
+    models = tested_models()
+    check_model_listing(base_url, models)
+    for model in models:
         check_system_one(base_url, model)
 
 

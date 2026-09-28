@@ -2,6 +2,17 @@
 
 All notable changes per release. Versions follow [SemVer](https://semver.org/). Before 1.0, compatible additions use a minor version and fixes use a patch version. Breaking API or configuration changes are called out.
 
+## v0.5.0
+
+Added:
+
+- Added CLM v0.1 as a local projection head. It evaluates TypeSafe requests through one configured OpenAI-compatible Qwen3-8B embeddings endpoint and returns the same typed answers and probabilities as Laya and Von.
+- Added per-provider enablement. A CLM-only deployment downloads only the CLM checkpoint. `GET /v1/models` and MCP list only the providers enabled by the deployment.
+
+Changed:
+
+- Rebuilt CPU and CUDA provider layers on the matching Torchbase images. Application changes now reuse the shared Torch runtime layers.
+
 ## v0.4.1
 
 Fixed:

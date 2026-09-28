@@ -3,6 +3,7 @@
 import os
 import sys
 from collections.abc import Callable
+from hashlib import sha256
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -11,11 +12,14 @@ import pytest
 
 import decidealot.provider_entrypoint as provider_entrypoint
 from decidealot.provider_entrypoint import (
+    clm_checkpoint_path,
     enable_offline_model_loading,
+    ensure_clm_checkpoint,
     ensure_laya_bundle,
     ensure_von_model,
     laya_model_specs,
     local_model_dir,
+    require_clm_checkpoint,
     require_laya_bundle,
     require_von_model,
 )
@@ -24,6 +28,9 @@ _laya_repository = "convaiinnovations/laya"
 _von_repository = "wfzyx/von"
 _laya_revision = "5e7b2b1b8ca2ecdd3f2322d94069c9b6ce7e844b"
 _von_revision = "d8bb5e0745d8ee1fb65d536d6d4892d54d5a93fd"
+_clm_repository = "Contrastive-LM/CLM-v0.1-8B"
+_clm_revision = "e939398d4556fcd9400c76fa8c5a513202f42b0a"
+_clm_filename = "CLM_v0.1-8B.pt"
 _hf_hub_offline_env = "HF_HUB_OFFLINE"
 _transformers_offline_env = "TRANSFORMERS_OFFLINE"
 _offline_enabled = "1"
@@ -113,6 +120,82 @@ def test_local_model_dir_uses_the_fixed_provider_subdirectory(
 
     assert local_model_dir("laya") == tmp_path / "laya"
     assert (tmp_path / "laya").is_dir()
+
+
+def test_clm_checkpoint_downloads_one_pinned_file_and_validates_its_digest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    model_dir = tmp_path / "clm"
+    model_dir.mkdir()
+    checkpoint_bytes = b"verified-clm-head"
+    expected_digest = sha256(checkpoint_bytes).hexdigest()
+    download_calls: list[dict[str, object]] = []
+
+    def snapshot_download(**kwargs: object) -> str:
+        download_calls.append(kwargs)
+        (Path(str(kwargs["local_dir"])) / _clm_filename).write_bytes(checkpoint_bytes)
+        return str(kwargs["local_dir"])
+
+    def provider_attribute(_module_name: str, _attribute_name: str) -> Callable[..., str]:
+        return snapshot_download
+
+    monkeypatch.setattr(provider_entrypoint, "_clm_model_sha256", expected_digest)
+    monkeypatch.setattr(
+        provider_entrypoint,
+        "import_provider_attribute",
+        provider_attribute,
+    )
+
+    checkpoint_path = ensure_clm_checkpoint(model_dir)
+
+    assert checkpoint_path == clm_checkpoint_path(model_dir)
+    assert checkpoint_path.read_bytes() == checkpoint_bytes
+    assert download_calls == [
+        {
+            "repo_id": _clm_repository,
+            "revision": _clm_revision,
+            "local_dir": str(model_dir),
+            "allow_patterns": (_clm_filename,),
+            "force_download": False,
+        }
+    ]
+
+
+def test_clm_checkpoint_replaces_an_invalid_existing_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    model_dir = tmp_path / "clm"
+    model_dir.mkdir()
+    checkpoint_path = clm_checkpoint_path(model_dir)
+    checkpoint_path.write_bytes(b"wrong")
+    replacement = b"verified-clm-head"
+    monkeypatch.setattr(
+        provider_entrypoint,
+        "_clm_model_sha256",
+        sha256(replacement).hexdigest(),
+    )
+    download_force_values: list[bool] = []
+
+    def snapshot_download(**kwargs: object) -> str:
+        download_force_values.append(bool(kwargs["force_download"]))
+        checkpoint_path.write_bytes(replacement)
+        return str(model_dir)
+
+    def provider_attribute(_module_name: str, _attribute_name: str) -> Callable[..., str]:
+        return snapshot_download
+
+    monkeypatch.setattr(
+        provider_entrypoint,
+        "import_provider_attribute",
+        provider_attribute,
+    )
+
+    ensure_clm_checkpoint(model_dir)
+
+    assert download_force_values == [True]
+    require_clm_checkpoint(model_dir)
 
 
 @pytest.mark.parametrize("provider_name", ["", "remote-url", "https://example.test"])
@@ -364,7 +447,10 @@ def test_von_entrypoint_starts_native_server_with_the_local_bundle(
     assert events["server"] == {"host": "127.0.0.1", "port": 8012}
 
 
-@pytest.mark.parametrize(("provider_name", "expected_call"), [("laya", "laya"), ("von", "von")])
+@pytest.mark.parametrize(
+    ("provider_name", "expected_call"),
+    [("laya", "laya"), ("von", "von"), ("clm", "clm")],
+)
 def test_provider_entrypoint_selects_only_the_requested_provider(
     monkeypatch: pytest.MonkeyPatch, provider_name: str, expected_call: str
 ) -> None:
@@ -372,13 +458,17 @@ def test_provider_entrypoint_selects_only_the_requested_provider(
     monkeypatch.setattr(sys, "argv", ["provider_entrypoint", provider_name])
     monkeypatch.setattr(provider_entrypoint, "run_laya", lambda: calls.append("laya"))
     monkeypatch.setattr(provider_entrypoint, "run_von", lambda: calls.append("von"))
+    monkeypatch.setattr(provider_entrypoint, "run_clm", lambda: calls.append("clm"))
 
     provider_entrypoint.main()
 
     assert calls == [expected_call]
 
 
-@pytest.mark.parametrize(("provider_name", "expected_call"), [("laya", "laya"), ("von", "von")])
+@pytest.mark.parametrize(
+    ("provider_name", "expected_call"),
+    [("laya", "laya"), ("von", "von"), ("clm", "clm")],
+)
 def test_provider_entrypoint_prepares_only_the_requested_provider(
     monkeypatch: pytest.MonkeyPatch, provider_name: str, expected_call: str
 ) -> None:
@@ -386,6 +476,7 @@ def test_provider_entrypoint_prepares_only_the_requested_provider(
     monkeypatch.setattr(sys, "argv", ["provider_entrypoint", "prepare", provider_name])
     monkeypatch.setattr(provider_entrypoint, "prepare_laya", lambda: calls.append("laya"))
     monkeypatch.setattr(provider_entrypoint, "prepare_von", lambda: calls.append("von"))
+    monkeypatch.setattr(provider_entrypoint, "prepare_clm", lambda: calls.append("clm"))
 
     provider_entrypoint.main()
 

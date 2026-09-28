@@ -23,6 +23,59 @@ def test_settings_exposes_no_model_location_or_default_model_configuration() -> 
     assert not hasattr(settings, "default_model")
 
 
+def test_settings_enables_clm_only_when_an_embeddings_endpoint_is_configured() -> None:
+    disabled = Settings()
+    enabled = Settings(clm_embeddings_url="https://embeddings.example.test/v1/embeddings")
+
+    assert disabled.enabled_provider_names == ("laya", "von")
+    assert enabled.enabled_provider_names == ("laya", "von", "clm")
+
+
+def test_settings_treats_the_compose_auto_value_as_endpoint_driven_clm_enablement() -> None:
+    disabled = Settings.model_validate({"clm_enabled": "auto"})
+    enabled = Settings.model_validate(
+        {
+            "clm_enabled": "auto",
+            "clm_embeddings_url": "https://embeddings.example.test/v1/embeddings",
+        }
+    )
+
+    assert disabled.enabled_provider_names == ("laya", "von")
+    assert enabled.enabled_provider_names == ("laya", "von", "clm")
+
+
+def test_settings_supports_clm_as_the_only_enabled_provider() -> None:
+    settings = Settings(
+        laya_enabled=False,
+        von_enabled=False,
+        clm_enabled=True,
+        clm_embeddings_url="https://embeddings.example.test/v1/embeddings",
+        clm_embeddings_model="qwen3-8b",
+    )
+
+    assert settings.enabled_provider_names == ("clm",)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"laya_enabled": False, "von_enabled": False, "clm_enabled": False},
+        {"clm_enabled": True},
+        {"clm_enabled": True, "clm_embeddings_url": "file:///models/embeddings"},
+        {
+            "clm_enabled": True,
+            "clm_embeddings_url": "https://embeddings.example.test/v1/embeddings",
+            "clm_embeddings_model": " ",
+        },
+    ],
+)
+def test_settings_rejects_invalid_enabled_provider_configuration(
+    settings: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate(settings)
+
+
 @pytest.mark.parametrize(
     ("configured_value", "expected_auth_enabled"),
     [(None, False), ("", False), ("operator-secret", True)],

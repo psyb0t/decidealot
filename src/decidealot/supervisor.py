@@ -14,6 +14,10 @@ from dataclasses import dataclass
 import httpx
 
 from decidealot.constants import (
+    CLM_HEALTH_URL,
+    CLM_PORT,
+    CLM_PROVIDER_NAME,
+    CLM_VENV_PYTHON,
     LAYA_HEALTH_URL,
     LAYA_PORT,
     LAYA_PROVIDER_NAME,
@@ -343,6 +347,7 @@ class ProviderSupervisor:
     def _default_specs(self) -> tuple[ProviderSpec, ...]:
         laya_data_dir = MODEL_DATA_DIRECTORY / LAYA_PROVIDER_NAME
         von_data_dir = MODEL_DATA_DIRECTORY / VON_PROVIDER_NAME
+        clm_data_dir = MODEL_DATA_DIRECTORY / CLM_PROVIDER_NAME
         common_environment = {"LOG_SCOPE_SERVICE": "decidealot"}
         laya_environment = {
             **common_environment,
@@ -360,40 +365,79 @@ class ProviderSupervisor:
             "VON_HOST": _loopback_address,
             "VON_PORT": str(VON_PORT),
         }
-        return (
-            ProviderSpec(
-                name=LAYA_PROVIDER_NAME,
-                health_url=LAYA_HEALTH_URL,
-                command=(
-                    LAYA_VENV_PYTHON,
-                    LOCAL_PROVIDER_ENTRYPOINT,
-                    LAYA_PROVIDER_NAME,
-                ),
-                environment=laya_environment,
-                prepare_command=(
-                    LAYA_VENV_PYTHON,
-                    LOCAL_PROVIDER_ENTRYPOINT,
-                    PROVIDER_ENTRYPOINT_PREPARE_ACTION,
-                    LAYA_PROVIDER_NAME,
-                ),
-            ),
-            ProviderSpec(
-                name=VON_PROVIDER_NAME,
-                health_url=VON_HEALTH_URL,
-                command=(
-                    VON_VENV_PYTHON,
-                    LOCAL_PROVIDER_ENTRYPOINT,
-                    VON_PROVIDER_NAME,
-                ),
-                environment=von_environment,
-                prepare_command=(
-                    VON_VENV_PYTHON,
-                    LOCAL_PROVIDER_ENTRYPOINT,
-                    PROVIDER_ENTRYPOINT_PREPARE_ACTION,
-                    VON_PROVIDER_NAME,
-                ),
-            ),
-        )
+        clm_environment = {
+            **common_environment,
+            "HF_HOME": str(clm_data_dir),
+            "CLM_HOST": _loopback_address,
+            "CLM_PORT": str(CLM_PORT),
+            "CLM_DEVICE": self._settings.device,
+            "CLM_EMBEDDINGS_URL": self._settings.clm_embeddings_url or "",
+            "CLM_EMBEDDINGS_MODEL": self._settings.clm_embeddings_model,
+            "CLM_EMBEDDINGS_TIMEOUT_SECONDS": str(self._settings.clm_embeddings_timeout_seconds),
+        }
+        if self._settings.clm_embeddings_api_key is not None:
+            clm_environment["CLM_EMBEDDINGS_API_KEY"] = (
+                self._settings.clm_embeddings_api_key.get_secret_value()
+            )
+        specs: list[ProviderSpec] = []
+        if self._settings.laya_enabled:
+            specs.append(
+                ProviderSpec(
+                    name=LAYA_PROVIDER_NAME,
+                    health_url=LAYA_HEALTH_URL,
+                    command=(
+                        LAYA_VENV_PYTHON,
+                        LOCAL_PROVIDER_ENTRYPOINT,
+                        LAYA_PROVIDER_NAME,
+                    ),
+                    environment=laya_environment,
+                    prepare_command=(
+                        LAYA_VENV_PYTHON,
+                        LOCAL_PROVIDER_ENTRYPOINT,
+                        PROVIDER_ENTRYPOINT_PREPARE_ACTION,
+                        LAYA_PROVIDER_NAME,
+                    ),
+                )
+            )
+        if self._settings.von_enabled:
+            specs.append(
+                ProviderSpec(
+                    name=VON_PROVIDER_NAME,
+                    health_url=VON_HEALTH_URL,
+                    command=(
+                        VON_VENV_PYTHON,
+                        LOCAL_PROVIDER_ENTRYPOINT,
+                        VON_PROVIDER_NAME,
+                    ),
+                    environment=von_environment,
+                    prepare_command=(
+                        VON_VENV_PYTHON,
+                        LOCAL_PROVIDER_ENTRYPOINT,
+                        PROVIDER_ENTRYPOINT_PREPARE_ACTION,
+                        VON_PROVIDER_NAME,
+                    ),
+                )
+            )
+        if self._settings.clm_enabled:
+            specs.append(
+                ProviderSpec(
+                    name=CLM_PROVIDER_NAME,
+                    health_url=CLM_HEALTH_URL,
+                    command=(
+                        CLM_VENV_PYTHON,
+                        LOCAL_PROVIDER_ENTRYPOINT,
+                        CLM_PROVIDER_NAME,
+                    ),
+                    environment=clm_environment,
+                    prepare_command=(
+                        CLM_VENV_PYTHON,
+                        LOCAL_PROVIDER_ENTRYPOINT,
+                        PROVIDER_ENTRYPOINT_PREPARE_ACTION,
+                        CLM_PROVIDER_NAME,
+                    ),
+                )
+            )
+        return tuple(specs)
 
 
 class DisabledProviderSupervisor:

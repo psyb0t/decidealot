@@ -2,11 +2,14 @@
 
 from pathlib import Path
 from typing import Annotated, Literal, cast
+from urllib.parse import urlsplit
 
 from pydantic import BeforeValidator, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from decidealot.constants import (
+    DEFAULT_CLM_EMBEDDINGS_MODEL,
+    DEFAULT_CLM_EMBEDDINGS_TIMEOUT_SECONDS,
     DEFAULT_DEVICE,
     DEFAULT_IMAGE_VARIANT,
     DEFAULT_LISTEN_HOST,
@@ -25,6 +28,8 @@ from decidealot.constants import (
 Device = Literal["cpu", "cuda"]
 ImageVariant = Literal["cpu", "cuda"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
+
+_clm_enabled_auto_value = "auto"
 
 
 def _absolute_path(value: object) -> Path:
@@ -46,6 +51,26 @@ def _normalize_allowlist(value: object) -> str:
     if any("\x00" in entry or len(entry) > 255 for entry in entries):
         raise ValueError("contains an invalid allowlist entry")
     return ",".join(entries)
+
+
+def _normalize_optional_http_url(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("must be an HTTP URL")
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if "\x00" in normalized:
+        raise ValueError("must not contain NUL bytes")
+    parsed = urlsplit(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("must be an absolute HTTP URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("must not contain credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("must not contain a query or fragment")
+    return normalized
 
 
 AbsolutePath = Annotated[Path, BeforeValidator(_absolute_path)]
@@ -74,6 +99,17 @@ class Settings(BaseSettings):
         ge=0,
         le=86_400,
     )
+    laya_enabled: bool = True
+    von_enabled: bool = True
+    clm_enabled: bool | None = None
+    clm_embeddings_url: str | None = None
+    clm_embeddings_model: str = Field(default=DEFAULT_CLM_EMBEDDINGS_MODEL, min_length=1)
+    clm_embeddings_api_key: SecretStr | None = None
+    clm_embeddings_timeout_seconds: float = Field(
+        default=DEFAULT_CLM_EMBEDDINGS_TIMEOUT_SECONDS,
+        gt=0,
+        le=600,
+    )
     max_request_bytes: int = Field(default=DEFAULT_MAX_REQUEST_BYTES, ge=1024, le=16_777_216)
     mcp_allowed_hosts: str = DEFAULT_MCP_ALLOWED_HOSTS
     mcp_allowed_origins: str = DEFAULT_MCP_ALLOWED_ORIGINS
@@ -84,6 +120,37 @@ class Settings(BaseSettings):
         if value is None or value == "":
             return None
         return value
+
+    @field_validator("clm_embeddings_api_key", mode="before")
+    @classmethod
+    def blank_clm_embeddings_api_key_is_omitted(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        return value
+
+    @field_validator("clm_enabled", mode="before")
+    @classmethod
+    def normalize_clm_enabled(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str) and value.strip().lower() in {"", _clm_enabled_auto_value}:
+            return None
+        return value
+
+    @field_validator("clm_embeddings_url", mode="before")
+    @classmethod
+    def normalize_clm_embeddings_url(cls, value: object) -> str | None:
+        return _normalize_optional_http_url(value)
+
+    @field_validator("clm_embeddings_model", mode="before")
+    @classmethod
+    def normalize_clm_embeddings_model(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError("must be a non-empty model name")
+        normalized = value.strip()
+        if not normalized or "\x00" in normalized:
+            raise ValueError("must be a non-empty model name without NUL bytes")
+        return normalized
 
     @field_validator("device", mode="before")
     @classmethod
@@ -106,7 +173,13 @@ class Settings(BaseSettings):
         return _normalize_allowlist(value)
 
     @model_validator(mode="after")
-    def device_matches_image_variant(self) -> "Settings":
+    def validate_configuration(self) -> "Settings":
+        if self.clm_enabled is None:
+            self.clm_enabled = self.clm_embeddings_url is not None
+        if self.clm_enabled and self.clm_embeddings_url is None:
+            raise ValueError("DECIDEALOT_CLM_EMBEDDINGS_URL is required when CLM is enabled")
+        if not self.enabled_provider_names:
+            raise ValueError("at least one local provider must be enabled")
         if self.device != self.image_variant:
             raise ValueError("DECIDEALOT_DEVICE must match the installed image variant")
         installed_image_variant = _read_installed_image_variant()
@@ -117,6 +190,17 @@ class Settings(BaseSettings):
     @property
     def mcp_allowed_host_values(self) -> tuple[str, ...]:
         return tuple(self.mcp_allowed_hosts.split(","))
+
+    @property
+    def enabled_provider_names(self) -> tuple[str, ...]:
+        enabled: list[str] = []
+        if self.laya_enabled:
+            enabled.append("laya")
+        if self.von_enabled:
+            enabled.append("von")
+        if self.clm_enabled:
+            enabled.append("clm")
+        return tuple(enabled)
 
     @property
     def mcp_allowed_origin_values(self) -> tuple[str, ...]:

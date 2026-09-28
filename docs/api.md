@@ -1,10 +1,10 @@
 # API
 
-Decidealot runs local Laya and Von decision models through a TypeSafe-compatible HTTP contract. Send the state to judge and define the allowed answer shape. Decidealot returns typed results with probabilities.
+Decidealot runs configured local Laya, Von, and CLM decision providers through a TypeSafe-compatible HTTP contract. Send the state to judge and define the allowed answer shape. Decidealot returns typed results with probabilities.
 
 ## Base URL and startup
 
-The examples use a local CPU container at `http://127.0.0.1:8080`. On a fresh model directory, Decidealot downloads and verifies both Laya and Von bundles before `/health` returns `200`. That first startup can take minutes. It prepares files only. Neither model nor Torch stays loaded until a `POST /v1/systemone` request selects a model.
+The examples use a local CPU container at `http://127.0.0.1:8080`. On a fresh model directory, Decidealot downloads and verifies every enabled bundle before `/health` returns `200`. The default configuration enables Laya and Von. CLM is enabled when its required embeddings URL is configured. That first startup can take minutes. It prepares files only. Neither model nor Torch stays loaded until a `POST /v1/systemone` request selects a model.
 
 Every response includes `X-Request-Id`. Send a UUID or ULID in that header when you need to correlate logs and calls. Decidealot creates a UUID when it is missing or invalid.
 
@@ -19,6 +19,8 @@ curl --fail --show-error "$base_url/health"
   "providers": ["laya", "von"]
 }
 ```
+
+`providers` lists only configured providers. A CLM-only deployment returns `{"status":"ok","providers":["clm"]}`.
 
 ## Authentication
 
@@ -155,6 +157,8 @@ curl --fail --show-error "$base_url/v1/models" --header "$auth_header"
   ]
 }
 ```
+
+The default catalog above contains Laya and Von. When CLM is enabled, the response also contains `clm`, `clm-latest`, `clm-0.1`, and `clm-0.1-8b`. Those selectors run the local `Contrastive-LM/CLM-v0.1-8B` projection head. CLM sends rendered decision state and criterion text to the configured OpenAI-compatible embeddings endpoint, which must return Qwen3-8B last-token vectors with exactly 4096 float values for each input.
 
 ## Make decisions
 
@@ -357,9 +361,31 @@ Decidealot returns the model result and its probabilities. Your caller applies t
 
 `choice.confidence` and `score.confidence` are model confidence values. `choice.probabilities` maps each criterion label to its probability. `score.probabilities` maps score positions to their probabilities. `noul` is the probability of true. Choose thresholds from the cost of being wrong in your workflow.
 
+## CLM requests
+
+CLM uses the same request and response contract as Laya and Von. Set `model` to a CLM selector returned by `GET /v1/models`. It does not accept an endpoint URL in a request. The operator configures one fixed embeddings endpoint at startup, and every CLM request goes only there.
+
+```json
+{
+  "model": "clm",
+  "state": {
+    "operation": "delete",
+    "reversible": false
+  },
+  "questions": {
+    "needs_review": {
+      "type": "noul",
+      "instructions": "Does this action need human review before it runs?"
+    }
+  }
+}
+```
+
+CLM returns the normal TypeSafe answer shape. Its `usage.input_tokens` value is the `usage.prompt_tokens` reported by the configured embeddings endpoint. It has no output tokens.
+
 ## Unload loaded runtimes
 
-Decidealot permits at most one provider process in memory. Selecting Laya after Von, or the reverse, waits for an active request to finish, releases the old model and Torch runtime, then starts the requested provider. A positive `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` also releases an idle provider. `0` turns off only the idle timer.
+Decidealot permits at most one provider process in memory. Selecting another provider waits for an active request to finish, releases the old model, Torch runtime, and CUDA context, then starts the requested provider. A positive `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` also releases an idle provider. `0` turns off only the idle timer.
 
 `POST /v1/models/unload` is the one public unload operation. It is idempotent and releases every loaded provider. If any provider has an active decision request, it returns `409` and releases none.
 
@@ -425,4 +451,4 @@ Failures outside that input contract use Decidealot's envelope:
 }
 ```
 
-The model catalog restricts API callers to fixed local Laya and Von providers. Each decision request supplies a model alias, state, and questions.
+The model catalog restricts API callers to fixed configured local providers. Each decision request supplies a model alias, state, and questions.

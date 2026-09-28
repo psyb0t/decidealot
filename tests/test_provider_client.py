@@ -8,6 +8,7 @@ import pytest
 
 from decidealot.errors import ProviderUnavailableError
 from decidealot.providers import HTTPProviderClient, default_provider_clients
+from decidealot.settings import Settings
 
 ProviderFailureFactory = Callable[[httpx.Request], httpx.HTTPError]
 
@@ -100,10 +101,26 @@ async def test_http_provider_preserves_upstream_client_validation_failure() -> N
 
 @pytest.mark.asyncio
 async def test_default_provider_clients_use_fixed_loopback_targets() -> None:
-    providers, client = default_provider_clients(timeout_seconds=12.5)
+    providers, client = default_provider_clients(Settings(request_timeout_seconds=12.5))
     try:
         assert set(providers) == {"laya", "von"}
         assert client.follow_redirects is False
         assert client.timeout.read == 12.5
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_default_provider_clients_only_create_configured_loopback_targets() -> None:
+    providers, client = default_provider_clients(
+        Settings(
+            laya_enabled=False,
+            von_enabled=False,
+            clm_enabled=True,
+            clm_embeddings_url="https://embeddings.example.test/v1/embeddings",
+        )
+    )
+    try:
+        assert set(providers) == {"clm"}
     finally:
         await client.aclose()

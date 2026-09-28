@@ -6,9 +6,9 @@
 [![license](https://raw.githubusercontent.com/psyb0t/decidealot/badges/license.svg)](LICENSE)
 [![Docker Pulls](https://img.shields.io/docker/pulls/psyb0t/decidealot?style=flat-square)](https://hub.docker.com/r/psyb0t/decidealot)
 
-Your hardware. Local decision models. Run Laya and Von through TypeSafe-compatible HTTP or MCP.
+Your hardware. Local decision models. Run Laya, Von, or a CLM projection head through TypeSafe-compatible HTTP or MCP.
 
-At startup Decidealot downloads and verifies both local model bundles. It then loads only the model selected by a request, unloads it after the configured idle period, and returns typed `choice`, `score`, and `noul` answers with model probabilities. It exposes the TypeSafe HTTP API and MCP Streamable HTTP from the same local container.
+At startup Decidealot downloads and verifies every enabled local bundle. It then loads only the provider selected by a request, unloads it after the configured idle period, and returns typed `choice`, `score`, and `noul` answers with model probabilities. CLM adds a small local projection head over one configured Qwen3-8B embeddings endpoint. It exposes the TypeSafe HTTP API and MCP Streamable HTTP from the same local container.
 
 ## Contents
 
@@ -42,7 +42,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.4.1
+  psyb0t/decidealot:latest
 ```
 
 Check the service, then ask Laya to make one typed decision:
@@ -68,7 +68,7 @@ curl --fail http://127.0.0.1:8080/v1/systemone \
   }'
 ```
 
-The first service startup downloads both pinned model bundles and can take several minutes. Wait for `/health` before sending a decision. Later service starts reuse the same host directory. The response includes `answers.handling.choice` and a probability per choice key. Your caller chooses what to do with that decision, for example only allowing `allow` when its probability meets your own threshold.
+The first service startup downloads the enabled pinned model bundles and can take several minutes. The default configuration enables Laya and Von. Wait for `/health` before sending a decision. Later service starts reuse the same host directory. The response includes `answers.handling.choice` and a probability per choice key. Your caller chooses what to do with that decision, for example only allowing `allow` when its probability meets your own threshold.
 
 ## Use the API
 
@@ -130,14 +130,15 @@ Every request must name a selector. `GET /v1/models` returns the same catalog at
 | `laya-multilingual` | Laya's multilingual checkpoint. | State is in another language or script, including short Latin-script text that is not clearly English. |
 | `laya-typed-decisions` | Laya's checkpoint tuned for structured workflow decisions. | Your workload looks like repeated policy, routing, triage, or approval decisions. Validate it on your own cases first. |
 | `von`, `von-latest`, `von-1.1`, `von-1.1.0` | The local English-only Von 1.1 model. | You want Von's independent result for a short, well-posed decision, or want to compare it with Laya before standardizing a workflow. |
+| `clm`, `clm-latest`, `clm-0.1`, `clm-0.1-8b` | The local CLM v0.1 projection head over one configured Qwen3-8B embeddings endpoint. | You have a trusted embeddings service that emits CLM-compatible 4096-wide last-token Qwen3-8B vectors. |
 
 ### What differs
 
 Laya is one model family with three checkpoints. Its automatic selectors choose English or multilingual checkpoints from the input script and a language heuristic. Use `laya-multilingual` for known non-English short Latin-script messages. `laya-typed-decisions` targets repeated structured decision work.
 
-Von is a separate English-only decision model for short questions with clear criteria. Both models take the same TypeSafe `state` and `questions` shape and return typed `choice`, `score`, and `noul` answers with probabilities. Your application applies the threshold and action that follow.
+Von is a separate English-only decision model for short questions with clear criteria. CLM is a local 75 MB projection head, not a text encoder. It calls one configured OpenAI-compatible `/v1/embeddings` URL and requires its configured model to return Qwen3-8B last-token vectors with exactly 4096 float values. All providers take the same TypeSafe `state` and `questions` shape and return typed `choice`, `score`, and `noul` answers with probabilities. Your application applies the threshold and action that follow.
 
-Decidealot keeps one provider resident. Moving between Laya selectors stays in the Laya provider. Moving between Laya and Von waits for active work, releases the old provider and its Torch memory, then starts the other one.
+Decidealot keeps one provider resident. Moving between Laya selectors stays in the Laya provider. Moving to another provider waits for active work, releases the old model, Torch allocations, and CUDA context, then starts the requested one.
 
 Set `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` to choose when an idle provider releases its model and Torch memory.
 
@@ -150,14 +151,21 @@ Pass configuration with `--env-file` or your container manager. The image uses f
 | `DECIDEALOT_API_KEY` | empty | Optional Bearer token for every public API and MCP request. |
 | `DECIDEALOT_MAX_REQUEST_BYTES` | `1048576` | Maximum JSON request body size. |
 | `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` | `600` | Idle time before automatic unload. Set `0` to disable only timeout-based unloads. |
+| `DECIDEALOT_LAYA_ENABLED` | `true` | Download and expose Laya selectors. |
+| `DECIDEALOT_VON_ENABLED` | `true` | Download and expose Von selectors. |
+| `DECIDEALOT_CLM_ENABLED` | `auto` | Enable CLM when its embeddings URL is set. Use `true` to require it or `false` to skip it. |
+| `DECIDEALOT_CLM_EMBEDDINGS_URL` | empty | Exact OpenAI-compatible `/v1/embeddings` URL used only by CLM. Required when CLM is enabled. |
+| `DECIDEALOT_CLM_EMBEDDINGS_MODEL` | `qwen3-8b` | Model selector sent to the embeddings endpoint. It must produce Qwen3-8B last-token vectors with width `4096`. |
+| `DECIDEALOT_CLM_EMBEDDINGS_API_KEY` | empty | Optional Bearer token sent only to the configured CLM embeddings endpoint. |
+| `DECIDEALOT_CLM_EMBEDDINGS_TIMEOUT_SECONDS` | `120` | One CLM embeddings request timeout in seconds. |
 | `DECIDEALOT_MCP_ALLOWED_HOSTS` | loopback names and `decidealot` | Comma-separated `Host` values accepted by MCP. Add each reverse-proxy hostname here. |
 | `DECIDEALOT_MCP_ALLOWED_ORIGINS` | loopback HTTP origins | Comma-separated browser origins accepted by MCP. Add each public browser origin here. |
 
-The container always stores bundles under `/models`. Its only model storage setting is the host directory mounted there. Keep the loopback bind for one-host use. Before putting Decidealot behind a proxy, tunnel, or public address, set `DECIDEALOT_API_KEY` to a real secret, require `Authorization: Bearer <your-key>` from every caller, and configure the precise MCP host and origin allowlists above.
+The container always stores bundles under `/models`. Its only model storage setting is the host directory mounted there. To run only CLM, set `DECIDEALOT_LAYA_ENABLED=false`, `DECIDEALOT_VON_ENABLED=false`, and configure `DECIDEALOT_CLM_EMBEDDINGS_URL`. The upstream endpoint receives your decision state and criteria, so use an endpoint you control or trust. Keep the loopback bind for one-host use. Before putting Decidealot behind a proxy, tunnel, or public address, set `DECIDEALOT_API_KEY` to a real secret, require `Authorization: Bearer <your-key>` from every caller, and configure the precise MCP host and origin allowlists above.
 
 ## CUDA
 
-`psyb0t/decidealot:v0.4.1-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
+`psyb0t/decidealot:latest-cuda` uses CUDA 12.6 and needs a compatible NVIDIA driver, NVIDIA Container Toolkit, and `--gpus all`. CUDA images are amd64-only. The CPU image is the right default unless inference speed and model memory justify the GPU setup.
 
 ```bash
 model_directory="${model_directory:-$HOME/.local/share/decidealot/models}"
@@ -175,14 +183,14 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 \
   --mount type=bind,source="$model_directory",target=/models \
   --publish 127.0.0.1:8080:8080 \
-  psyb0t/decidealot:v0.4.1-cuda
+  psyb0t/decidealot:latest-cuda
 ```
 
 CUDA needs one writable executable cache because Triton compiles and loads short-lived CUDA helpers there. The rest of the container remains read-only and `noexec`. [Deployment](docs/deployment.md) has the complete CPU, CUDA, authentication, persistent-storage, and host-directory recipes.
 
 ## Model storage and unloading
 
-Mount one narrow host directory at `/models`. Decidealot creates and manages `/models/laya` and `/models/von` inside it. The Docker commands run as your current host UID and GID, so a directory you create yourself is writable without an image-specific `chown`. The image falls back to non-root `1000:1000` only when no runtime user is supplied.
+Mount one narrow host directory at `/models`. Decidealot creates and manages `/models/laya`, `/models/von`, and, when enabled, `/models/clm` inside it. The Docker commands run as your current host UID and GID, so a directory you create yourself is writable without an image-specific `chown`. The image falls back to non-root `1000:1000` only when no runtime user is supplied.
 
 Unload the loaded runtime when you are done with it:
 
@@ -190,11 +198,11 @@ Unload the loaded runtime when you are done with it:
 curl --fail --request POST http://127.0.0.1:8080/v1/models/unload
 ```
 
-Only one provider can be loaded, but the endpoint reports both providers so the result is clear. Unload terminates the provider process, so it releases model weights, Torch allocations, worker threads, and the CUDA context. A later request starts it again.
+Only one provider can be loaded, and the endpoint reports every configured provider so the result is clear. Unload terminates the provider process, so it releases model weights, Torch allocations, worker threads, and the CUDA context. A later request starts it again.
 
 ## Agent integrations
 
-Install the Decidealot skill from the psyb0t marketplace after the release that contains it. The skill tells an agent how to deploy the Docker image, choose Laya or Von, submit TypeSafe decisions, read probabilities, use direct MCP, and use the stdio bridge only when its client needs one.
+Install the Decidealot skill from the psyb0t marketplace after the release that contains it. The skill tells an agent how to deploy the Docker image, choose Laya, Von, or CLM, submit TypeSafe decisions, read probabilities, use direct MCP, and use the stdio bridge only when its client needs one.
 
 ```bash
 claude plugin marketplace add psyb0t/agents
@@ -221,4 +229,4 @@ openclaw plugins install clawhub:@psyb0t/decidealot
 
 ## License
 
-Decidealot code is WTFPL. Laya, Von, PyTorch, Transformers, and each downloaded model keep their own upstream licenses. Read those before putting a model into a commercial product.
+Decidealot code is WTFPL. Laya, Von, CLM, PyTorch, Transformers, and each downloaded model keep their own upstream licenses. Read those before putting a model into a commercial product.

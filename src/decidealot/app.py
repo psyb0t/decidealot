@@ -64,19 +64,17 @@ def create_app(
     providers: Mapping[str, ProviderClient] | None = None,
     supervisor: Supervisor | None = None,
 ) -> FastAPI:
-    """Build a public router around fixed local Laya and Von endpoints."""
+    """Build a public router around fixed configured local provider endpoints."""
 
     resolved_settings = settings or Settings()
     owns_http_client = providers is None
     http_client: httpx.AsyncClient | None = None
     if providers is None:
-        resolved_providers, http_client = default_provider_clients(
-            resolved_settings.request_timeout_seconds
-        )
+        resolved_providers, http_client = default_provider_clients(resolved_settings)
     else:
         resolved_providers = dict(providers)
     resolved_supervisor = supervisor or ProviderSupervisor(resolved_settings)
-    model_router = ModelRouter()
+    model_router = ModelRouter(resolved_settings)
     decisions = DecisionService(resolved_providers, resolved_supervisor, model_router)
     mcp_server = create_mcp_server(decisions)
     configured_api_key = (
@@ -186,7 +184,7 @@ def create_app(
             )
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={"status": "ok", "providers": ["laya", "von"]},
+            content={"status": "ok", "providers": list(resolved_settings.enabled_provider_names)},
         )
 
     @app.get(MODELS_PATH, status_code=status.HTTP_200_OK)

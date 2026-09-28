@@ -5,6 +5,7 @@ readonly CPU_COMPOSE_FILE="docker-compose.yml"
 readonly CUDA_COMPOSE_FILE="docker-compose.cuda.yml"
 readonly SHARED_AUDIT_PATH="/home/bw/.codex/rig/scripts/audit-compose.sh"
 readonly DEFAULT_LOG_FILE="/tmp/decidealot-audit-compose.log"
+readonly AUDIT_MODEL_DIRECTORY="/tmp/decidealot-compose-audit-models"
 
 LOG_FILE="${LOG_FILE:-$DEFAULT_LOG_FILE}"
 exec > >(tee -a "$LOG_FILE") 2>&1
@@ -58,7 +59,8 @@ if [[ -n "${DEBUG:-}" ]]; then
 fi
 log INFO "auditing resolved Compose configuration cuda=$cuda"
 cd "$repo_dir"
-docker compose "${compose_args[@]}" config --format json |
+DECIDEALOT_MODEL_DIRECTORY="${DECIDEALOT_MODEL_DIRECTORY:-$AUDIT_MODEL_DIRECTORY}" \
+	docker compose "${compose_args[@]}" config --format json |
 	jq '
 		# Docker Compose v2 emits duration strings, while the shared auditor expects nanoseconds.
 		def healthcheck_duration:

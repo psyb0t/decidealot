@@ -1,6 +1,6 @@
 ---
 name: "decidealot"
-description: "Run local Laya or Von typed classification, scoring, and true-or-false decisions through Decidealot REST or MCP. Use when a user needs a bounded decision with probabilities, wants to deploy the Docker image, inspect local model aliases, or release model memory."
+description: "Run local Laya, Von, or CLM typed classification, scoring, and true-or-false decisions through Decidealot REST or MCP. Use when a user needs a bounded decision with probabilities, wants to deploy the Docker image, inspect configured model aliases, or release model memory."
 homepage: "https://github.com/psyb0t/decidealot"
 metadata:
   openclaw:
@@ -17,7 +17,7 @@ user-invocable: true
 
 # Decidealot
 
-Decidealot runs Laya and Von locally. It turns supplied state into typed `choice`, `score`, or `noul` results with probabilities. The caller applies the threshold and any action that follows.
+Decidealot runs configured Laya, Von, and CLM providers locally. It turns supplied state into typed `choice`, `score`, or `noul` results with probabilities. CLM is a local projection head over one configured Qwen3-8B embeddings endpoint. The caller applies the threshold and any action that follows.
 
 Use a running Decidealot endpoint. Clone or build this repository only for Decidealot development work.
 
@@ -29,12 +29,13 @@ Read [references/setup.md](references/setup.md) before deploying a container or 
 - Keep authorization, ownership, irreversible-action checks, and final thresholds in the caller. For costly mistakes, route uncertainty to human review.
 - Send user data only to the endpoint the user named. Never search workspace files for `DECIDEALOT_API_KEY` or create an unauthenticated public endpoint.
 - Every decision request needs an explicit local `model` selector from `GET /v1/models`.
+- CLM sends decision state and criteria to its configured embeddings endpoint. Use it only when the endpoint is controlled or trusted and returns Qwen3-8B last-token embeddings with width `4096`.
 - `unload_models` evicts the loaded model and Torch runtime. Use it only when the user asks to free memory.
 
 ## When to use
 
 1. Get `DECIDEALOT_URL` from the user or their environment. Default local deployment is `http://127.0.0.1:8080`.
-2. Call `GET /health`, then `GET /v1/models` before choosing a selector you have not already been given.
+2. Call `GET /health`, then `GET /v1/models` before choosing a selector you have not already been given. The catalog contains only providers enabled by the deployment.
 3. Put the raw subject in `state`. Define bounded questions in `questions`.
 4. Read the typed answer and its probabilities. Report them plainly. The caller, not the model, selects the next action.
 5. Use REST for application requests and machine-readable errors. Use MCP at `/mcp` when an MCP client already supports Streamable HTTP. Use the stdio bridge only for a client that cannot connect to remote MCP.

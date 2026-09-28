@@ -1,6 +1,6 @@
 # Run and connect to Decidealot
 
-Decidealot ships as the `psyb0t/decidealot` Docker image. It downloads its pinned Laya and Von bundles during startup into the host directory mounted at `/models`. Build from source only for development work.
+Decidealot ships as the `psyb0t/decidealot` Docker image. It downloads its pinned enabled Laya, Von, and CLM bundles during startup into the host directory mounted at `/models`. CLM also needs one configured OpenAI-compatible embeddings endpoint. Build from source only for development work.
 
 ## Start the CPU image
 
@@ -22,7 +22,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   psyb0t/decidealot:latest
 ```
 
-The first start downloads model files and can take several minutes. Wait for this to return successfully before using the API:
+The first start downloads enabled model files and can take several minutes. Laya and Von are enabled by default. CLM enables automatically only when `DECIDEALOT_CLM_EMBEDDINGS_URL` is set. Wait for this to return successfully before using the API:
 
 ```bash
 curl --fail --show-error http://127.0.0.1:8080/health
@@ -67,7 +67,7 @@ curl --fail --show-error "$DECIDEALOT_URL/v1/systemone" \
   }'
 ```
 
-Use `GET /v1/models` to learn the available Laya and Von aliases. Use `POST /v1/models/unload` to release the loaded runtime only when the user asks to free memory. The full request and response contract is in [API](https://github.com/psyb0t/decidealot/blob/main/docs/api.md).
+Use `GET /v1/models` to learn the configured Laya, Von, and CLM aliases. CLM selectors appear only when the deployment has a fixed embeddings URL that returns Qwen3-8B last-token vectors with width `4096`. Use `POST /v1/models/unload` to release the loaded runtime only when the user asks to free memory. The full request and response contract is in [API](https://github.com/psyb0t/decidealot/blob/main/docs/api.md).
 
 ## MCP
 

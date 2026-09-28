@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
+ARG TORCHBASE_IMAGE=psyb0t/torchbase:py3.12-torch2.14-latest-cpu
+
+FROM ghcr.io/astral-sh/uv:0.11.15@sha256:e590846f4776907b254ac0f44b5b380347af5d90d668138ca7938d1b0c2f98d3 AS uv
+
 FROM python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2 AS application-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -17,33 +21,20 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable \
     && /opt/app-venv/bin/python -c "import decidealot"
 
-FROM python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2 AS laya-builder
+FROM ${TORCHBASE_IMAGE} AS provider-runtime
 
 ENV UV_LINK_MODE=copy
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.15@sha256:e590846f4776907b254ac0f44b5b380347af5d90d668138ca7938d1b0c2f98d3 /uv /usr/local/bin/uv
-
+USER root
 WORKDIR /build
 
-COPY requirements-laya-cpu.txt ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv /opt/laya-venv \
-    && uv pip install --python /opt/laya-venv/bin/python --require-hashes --torch-backend cpu -r requirements-laya-cpu.txt
+COPY requirements-providers-cpu.txt ./
+RUN --mount=from=uv,source=/uv,target=/usr/local/bin/uv,readonly \
+    --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /opt/torch-venv/bin/python --require-hashes -r requirements-providers-cpu.txt \
+    && /opt/torch-venv/bin/python -c "import laya, torch, von; assert torch.__version__ == '2.14.0+cpu'"
 
-FROM python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2 AS von-builder
-
-ENV UV_LINK_MODE=copy
-
-COPY --from=ghcr.io/astral-sh/uv:0.11.15@sha256:e590846f4776907b254ac0f44b5b380347af5d90d668138ca7938d1b0c2f98d3 /uv /usr/local/bin/uv
-
-WORKDIR /build
-
-COPY requirements-von-cpu.txt ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv /opt/von-venv \
-    && uv pip install --python /opt/von-venv/bin/python --require-hashes --torch-backend cpu -r requirements-von-cpu.txt
-
-FROM python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2 AS runtime
+FROM provider-runtime AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -60,9 +51,8 @@ RUN mkdir --parents /etc/decidealot /models \
     && printf 'cpu\n' > /etc/decidealot/image-variant \
     && chown 1000:1000 /models
 
-COPY --from=laya-builder /opt/laya-venv /opt/laya-venv
-COPY --from=von-builder /opt/von-venv /opt/von-venv
 COPY --from=application-builder /opt/app-venv /opt/app-venv
+COPY src/decidealot/clm_runtime.py /opt/decidealot/clm_runtime.py
 COPY src/decidealot/provider_entrypoint.py /opt/decidealot/provider_entrypoint.py
 
 USER 1000:1000

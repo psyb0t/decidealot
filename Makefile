@@ -4,6 +4,9 @@ SHELL := /bin/bash
 DEV_IMAGE := psyb0t/decidealot-dev
 CPU_IMAGE := psyb0t/decidealot
 CUDA_IMAGE := psyb0t/decidealot
+TORCHBASE_CPU_IMAGE := psyb0t/torchbase:py3.12-torch2.14-latest-cpu
+TORCHBASE_CUDA_IMAGE := psyb0t/torchbase:py3.12-torch2.14-latest-cu126
+TORCH_VENV_DIRECTORY := /opt/torch-venv
 MIN_TEST_COVERAGE := 90
 TAG = $(shell awk -F\" '/^version *= */ {print "v" $$2; exit}' pyproject.toml)
 UID := $(shell id -u)
@@ -23,7 +26,7 @@ DEV_RUN_DIND := docker run --rm --init --user $(UID):$(GID) \
 	-v $(CURDIR):$(CURDIR) -w $(CURDIR) \
 	-v $(DOCKER_SOCK):$(DOCKER_SOCK) $(DEV_IMAGE)
 
-.PHONY: help dev-image dev-tools-image shell pkg-lock pkg-add pkg-update pkg-upgrade pkg-remove model-lock dep format lint lint-fix audit sec test test-unit test-integration test-coverage test-real test-real-cuda generate build build-cuda build-all build-test build-test-cuda run run-cuda restart restart-cuda stop status audit-compose audit-compose-cuda version clean
+.PHONY: help dev-image dev-tools-image shell pkg-lock pkg-add pkg-update pkg-upgrade pkg-remove model-lock dep format lint lint-fix audit sec test test-unit test-integration test-coverage test-real test-real-cuda test-real-clm generate build build-cuda build-all build-test build-test-cuda run run-cuda restart restart-cuda stop status audit-compose audit-compose-cuda version clean
 
 help: ## List supported operations
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -58,10 +61,8 @@ pkg-remove: dev-tools-image ## Remove one application dependency with PKG=name
 	$(DEV_TOOL_RUN) bash -ceu 'uv remove --no-sync --exclude-newer $(DEPENDENCY_CUTOFF) "$(PKG)"'
 
 model-lock: dev-tools-image ## Generate hash-locked CPU and CUDA model dependency files
-	$(DEV_TOOL_RUN) bash -ceu 'uv pip compile requirements-laya-cpu.in --output-file requirements-laya-cpu.txt --generate-hashes --quiet --torch-backend cpu --exclude-newer $(DEPENDENCY_CUTOFF) --exclude-newer-package laya=$(MODEL_EXCEPTION_CUTOFF)'
-	$(DEV_TOOL_RUN) bash -ceu 'uv pip compile requirements-von-cpu.in --output-file requirements-von-cpu.txt --generate-hashes --quiet --torch-backend cpu --exclude-newer $(DEPENDENCY_CUTOFF) --exclude-newer-package von-sdk=$(MODEL_EXCEPTION_CUTOFF)'
-	$(DEV_TOOL_RUN) bash -ceu 'uv pip compile requirements-laya-cuda.in --output-file requirements-laya-cuda.txt --generate-hashes --quiet --torch-backend cu126 --exclude-newer $(DEPENDENCY_CUTOFF) --exclude-newer-package laya=$(MODEL_EXCEPTION_CUTOFF)'
-	$(DEV_TOOL_RUN) bash -ceu 'uv pip compile requirements-von-cuda.in --output-file requirements-von-cuda.txt --generate-hashes --quiet --torch-backend cu126 --exclude-newer $(DEPENDENCY_CUTOFF) --exclude-newer-package von-sdk=$(MODEL_EXCEPTION_CUTOFF)'
+	$(DEV_TOOL_RUN) bash -ceu 'uv pip compile requirements-providers-cpu.in --output-file requirements-providers-cpu.txt --generate-hashes --quiet --torch-backend cpu --exclude-newer $(DEPENDENCY_CUTOFF) --exclude-newer-package laya=$(MODEL_EXCEPTION_CUTOFF) --exclude-newer-package von-sdk=$(MODEL_EXCEPTION_CUTOFF)'
+	$(DEV_TOOL_RUN) bash -ceu 'uv pip compile requirements-providers-cuda.in --output-file requirements-providers-cuda.txt --generate-hashes --quiet --torch-backend cu126 --exclude-newer $(DEPENDENCY_CUTOFF) --exclude-newer-package laya=$(MODEL_EXCEPTION_CUTOFF) --exclude-newer-package von-sdk=$(MODEL_EXCEPTION_CUTOFF)'
 
 dep: pkg-lock model-lock ## Refresh every locked dependency artifact
 
@@ -91,22 +92,27 @@ test-real: build ## Run real HTTP requests against downloaded CPU Laya and Von w
 test-real-cuda: build-cuda ## Run real HTTP requests against downloaded CUDA Laya and Von weights
 	bash tests/integration/e2e_local_models.sh --cuda
 
+test-real-clm: build ## Run the real CLM head against a strict mock embeddings endpoint
+	bash tests/integration/e2e_clm.sh
+
 generate: dev-image ## Regenerate every owned artifact
 	$(DEV_RUN) python scripts/generate.py
 
 build: ## Build the CPU production image
-	docker build -f Dockerfile -t $(CPU_IMAGE):local -t $(CPU_IMAGE):$(TAG) -t $(CPU_IMAGE):latest .
+	docker build --build-arg TORCHBASE_IMAGE=$(TORCHBASE_CPU_IMAGE) -f Dockerfile -t $(CPU_IMAGE):local -t $(CPU_IMAGE):$(TAG) -t $(CPU_IMAGE):latest .
 
 build-cuda: ## Build the CUDA production image
-	docker build -f Dockerfile.cuda -t $(CUDA_IMAGE):local-cuda -t $(CUDA_IMAGE):$(TAG)-cuda -t $(CUDA_IMAGE):latest-cuda .
+	docker build --build-arg TORCHBASE_IMAGE=$(TORCHBASE_CUDA_IMAGE) -f Dockerfile.cuda -t $(CUDA_IMAGE):local-cuda -t $(CUDA_IMAGE):$(TAG)-cuda -t $(CUDA_IMAGE):latest-cuda .
 
 build-all: build build-cuda ## Build both production images
 
 build-test: build ## Import the CPU image and verify its immutable runtime metadata
 	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --entrypoint python $(CPU_IMAGE):local -c 'import os; from decidealot.settings import Settings; assert Settings().image_variant == "cpu"; assert os.environ["HOME"] == "/tmp"; assert (os.getuid(), os.getgid()) == (1000, 1000)'
+	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --entrypoint $(TORCH_VENV_DIRECTORY)/bin/python $(CPU_IMAGE):local -c 'import pathlib, torch, laya, von; assert torch.__version__ == "2.14.0+cpu"; assert pathlib.Path("$(TORCH_VENV_DIRECTORY)/bin/laya-serve").is_file(); assert pathlib.Path("$(TORCH_VENV_DIRECTORY)/bin/von").is_file(); assert not pathlib.Path("/opt/laya-venv").exists(); assert not pathlib.Path("/opt/von-venv").exists()'
 
 build-test-cuda: build-cuda ## Import the CUDA image and verify its immutable runtime metadata
 	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --tmpfs /var/cache:rw,exec,nosuid,nodev,size=8m,uid=1000,gid=1000,mode=0755 --entrypoint python $(CUDA_IMAGE):local-cuda -c 'import os, shutil; from decidealot.settings import Settings; assert Settings().image_variant == "cuda"; assert os.environ["HOME"] == "/tmp"; assert (os.getuid(), os.getgid()) == (1000, 1000); assert os.environ["TRITON_CACHE_DIR"] == "/var/cache/triton"; assert os.access("/var/cache", os.W_OK); assert shutil.which("cc"); assert os.path.isfile("/usr/include/python3.12/Python.h")'
+	docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --tmpfs /var/cache:rw,exec,nosuid,nodev,size=8m,uid=1000,gid=1000,mode=0755 --entrypoint $(TORCH_VENV_DIRECTORY)/bin/python $(CUDA_IMAGE):local-cuda -c 'import pathlib, torch, laya, von; assert torch.__version__ == "2.14.0+cu126"; assert torch.version.cuda == "12.6"; assert pathlib.Path("$(TORCH_VENV_DIRECTORY)/bin/laya-serve").is_file(); assert pathlib.Path("$(TORCH_VENV_DIRECTORY)/bin/von").is_file(); assert not pathlib.Path("/opt/laya-venv").exists(); assert not pathlib.Path("/opt/von-venv").exists()'
 
 run: build ## Build and start the local hardened Compose service
 	DECIDEALOT_UID="$(UID)" DECIDEALOT_GID="$(GID)" docker compose up -d
