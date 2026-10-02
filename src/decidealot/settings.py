@@ -16,13 +16,17 @@ from decidealot.constants import (
     DEFAULT_LISTEN_PORT,
     DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
+    DEFAULT_MAX_BATCH_CONCURRENCY,
+    DEFAULT_MAX_BATCH_REQUESTS,
     DEFAULT_MAX_REQUEST_BYTES,
+    DEFAULT_MAX_RESIDENT_LOCAL_PROVIDERS,
     DEFAULT_MCP_ALLOWED_HOSTS,
     DEFAULT_MCP_ALLOWED_ORIGINS,
     DEFAULT_PROVIDER_IDLE_UNLOAD_SECONDS,
     DEFAULT_PROVIDER_START_TIMEOUT_SECONDS,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     IMAGE_VARIANT_METADATA_PATH,
+    MAX_LOCAL_PROVIDERS,
 )
 
 Device = Literal["cpu", "cuda"]
@@ -99,6 +103,11 @@ class Settings(BaseSettings):
         ge=0,
         le=86_400,
     )
+    max_resident_local_providers: int = Field(
+        default=DEFAULT_MAX_RESIDENT_LOCAL_PROVIDERS, ge=1, le=MAX_LOCAL_PROVIDERS
+    )
+    max_batch_requests: int = Field(default=DEFAULT_MAX_BATCH_REQUESTS, ge=0)
+    max_batch_concurrency: int = Field(default=DEFAULT_MAX_BATCH_CONCURRENCY, ge=0)
     laya_enabled: bool = True
     von_enabled: bool = True
     clm_enabled: bool | None = None
@@ -110,6 +119,9 @@ class Settings(BaseSettings):
         gt=0,
         le=600,
     )
+    clm_parallel_with_local_models: bool = False
+    typesafe_api_key: SecretStr | None = None
+    jev_enabled: bool | None = None
     max_request_bytes: int = Field(default=DEFAULT_MAX_REQUEST_BYTES, ge=1024, le=16_777_216)
     mcp_allowed_hosts: str = DEFAULT_MCP_ALLOWED_HOSTS
     mcp_allowed_origins: str = DEFAULT_MCP_ALLOWED_ORIGINS
@@ -121,7 +133,7 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("clm_embeddings_api_key", mode="before")
+    @field_validator("clm_embeddings_api_key", "typesafe_api_key", mode="before")
     @classmethod
     def blank_clm_embeddings_api_key_is_omitted(cls, value: object) -> object:
         if value is None or value == "":
@@ -131,6 +143,15 @@ class Settings(BaseSettings):
     @field_validator("clm_enabled", mode="before")
     @classmethod
     def normalize_clm_enabled(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str) and value.strip().lower() in {"", _clm_enabled_auto_value}:
+            return None
+        return value
+
+    @field_validator("jev_enabled", mode="before")
+    @classmethod
+    def normalize_jev_enabled(cls, value: object) -> object:
         if value is None:
             return None
         if isinstance(value, str) and value.strip().lower() in {"", _clm_enabled_auto_value}:
@@ -178,8 +199,12 @@ class Settings(BaseSettings):
             self.clm_enabled = self.clm_embeddings_url is not None
         if self.clm_enabled and self.clm_embeddings_url is None:
             raise ValueError("DECIDEALOT_CLM_EMBEDDINGS_URL is required when CLM is enabled")
+        if self.jev_enabled is None:
+            self.jev_enabled = self.typesafe_api_key is not None
+        if self.jev_enabled and self.typesafe_api_key is None:
+            raise ValueError("DECIDEALOT_TYPESAFE_API_KEY is required when Jev is enabled")
         if not self.enabled_provider_names:
-            raise ValueError("at least one local provider must be enabled")
+            raise ValueError("at least one provider must be enabled")
         if self.device != self.image_variant:
             raise ValueError("DECIDEALOT_DEVICE must match the installed image variant")
         installed_image_variant = _read_installed_image_variant()
@@ -200,6 +225,8 @@ class Settings(BaseSettings):
             enabled.append("von")
         if self.clm_enabled:
             enabled.append("clm")
+        if self.jev_enabled:
+            enabled.append("jev")
         return tuple(enabled)
 
     @property

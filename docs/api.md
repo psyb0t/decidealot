@@ -1,10 +1,10 @@
 # API
 
-Decidealot runs configured local Laya, Von, and CLM decision providers through a TypeSafe-compatible HTTP contract. Send the state to judge and define the allowed answer shape. Decidealot returns typed results with probabilities.
+Decidealot runs configured local Laya, Von, and CLM providers or TypeSafe's hosted Jev through one TypeSafe-compatible HTTP contract. Send the state to judge and define the allowed answer shape. Decidealot returns typed results with probabilities.
 
 ## Base URL and startup
 
-The examples use a local CPU container at `http://127.0.0.1:8080`. On a fresh model directory, Decidealot downloads and verifies every enabled bundle before `/health` returns `200`. The default configuration enables Laya and Von. CLM is enabled when its required embeddings URL is configured. That first startup can take minutes. It prepares files only. Neither model nor Torch stays loaded until a `POST /v1/systemone` request selects a model.
+The examples use a local CPU container at `http://127.0.0.1:8080`. On a fresh model directory, Decidealot downloads and verifies every enabled local bundle before `/health` returns `200`. The default configuration enables Laya and Von. CLM is enabled when its required embeddings URL is configured. That first startup can take minutes. It prepares files only. Neither model nor Torch stays loaded until a `POST /v1/systemone` request selects a local model. Jev enables when a TypeSafe key is configured and needs no local bundle.
 
 Every response includes `X-Request-Id`. Send a UUID or ULID in that header when you need to correlate logs and calls. Decidealot creates a UUID when it is missing or invalid.
 
@@ -20,7 +20,7 @@ curl --fail --show-error "$base_url/health"
 }
 ```
 
-`providers` lists only configured providers. A CLM-only deployment returns `{"status":"ok","providers":["clm"]}`.
+`providers` lists only configured providers. A CLM-only deployment returns `{"status":"ok","providers":["clm"]}`. A Jev-only deployment returns `{"status":"ok","providers":["jev"]}`.
 
 ## Authentication
 
@@ -43,7 +43,7 @@ Missing or wrong credentials return `401`:
 
 ## MCP Streamable HTTP
 
-The container also exposes version 2 MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. It shares the provider supervisor, public model aliases, request validation, body limit, Bearer authentication, and request ID rules with the TypeSafe-compatible HTTP endpoints.
+The container also exposes version 2 MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. It shares the decision service, public model aliases, request validation, body limit, Bearer authentication, and request ID rules with the TypeSafe-compatible HTTP endpoints. Local models use the provider supervisor; hosted Jev does not.
 
 MCP clients differ in configuration syntax, but they need one Streamable HTTP server URL and the same optional Bearer header:
 
@@ -65,6 +65,7 @@ When authentication is disabled, omit `headers`. When it is enabled, an absent o
 | Tool | Input | Structured output |
 | --- | --- | --- |
 | `system_one` | Required `model`, `state`, and `questions`, exactly as described in [Make decisions](#make-decisions). | The same `model`, `answers`, and `usage` object returned by `POST /v1/systemone`. |
+| `system_one_batch` | Required nonempty `requests` list of complete `model`, `state`, and `questions` objects. | The same ordered `{ "results": [...] }` object returned by `POST /v1/systemone/batch`. |
 | `list_models` | None. | The same `{ "models": [...] }` catalog returned by `GET /v1/models`. |
 | `unload_models` | None. | The same unload status and provider list returned by `POST /v1/models/unload`. |
 
@@ -158,7 +159,7 @@ curl --fail --show-error "$base_url/v1/models" --header "$auth_header"
 }
 ```
 
-The default catalog above contains Laya and Von. When CLM is enabled, the response also contains `clm`, `clm-latest`, `clm-0.1`, and `clm-0.1-8b`. Those selectors run the local `Contrastive-LM/CLM-v0.1-8B` projection head. CLM sends rendered decision state and criterion text to the configured OpenAI-compatible embeddings endpoint, which must return Qwen3-8B last-token vectors with exactly 4096 float values for each input.
+The default catalog above contains Laya and Von. When CLM is enabled, the response also contains `clm`, `clm-latest`, `clm-0.1`, and `clm-0.1-8b`. Those selectors run the local `Contrastive-LM/CLM-v0.1-8B` projection head. CLM sends rendered decision state and criterion text to the configured OpenAI-compatible embeddings endpoint, which must return Qwen3-8B last-token vectors with exactly 4096 float values for each input. When Jev is enabled, Decidealot adds the models and aliases returned by TypeSafe's authenticated `GET /v1/models`. It refreshes that catalog every 60 seconds. The listed hosted names are passed through exactly; Decidealot does not invent a `jev` alias. Local selectors win if TypeSafe ever returns a colliding name. If TypeSafe's catalog is unavailable or malformed, model listing and hosted requests return a safe `503`; local decisions still work.
 
 ## Make decisions
 
@@ -170,7 +171,7 @@ The default catalog above contains Laya and Von. When CLM is enabled, the respon
 | `state` | string, object, or array | The raw thing to classify, score, or judge. |
 | `questions` | object | One or more named `choice`, `score`, or `noul` questions. |
 
-Question names are yours. The response repeats them under `answers`. `instructions` is optional for all question types. It, `state`, and criterion values can be strings, JSON objects, or JSON arrays. Decidealot converts nested instruction and criterion values to text for local model runtimes without changing the choice labels, score order, or `state`.
+Question names are yours. The response repeats them under `answers`. `instructions` is optional for all question types. It, `state`, and criterion values can be strings, JSON objects, or JSON arrays. Decidealot converts nested instruction and criterion values to text for local model runtimes without changing the choice labels, score order, or `state`. Jev receives the validated JSON structure with the exact hosted model name you selected.
 
 The response shape always contains `model`, `answers`, and `usage`. The numeric values below are examples. A real model call chooses its own answer and probabilities.
 
@@ -361,6 +362,41 @@ Decidealot returns the model result and its probabilities. Your caller applies t
 
 `choice.confidence` and `score.confidence` are model confidence values. `choice.probabilities` maps each criterion label to its probability. `score.probabilities` maps score positions to their probabilities. `noul` is the probability of true. Choose thresholds from the cost of being wrong in your workflow.
 
+## Batch independent decisions
+
+`POST /v1/systemone/batch` takes `requests`, a nonempty list of complete System One request objects. Each item can choose a different model, state, and set of questions. The same model can appear more than once. Requests to the same underlying model run in input order. Different models can overlap when their execution policy permits it. Decidealot returns one normal System One result per item, in input order even if another model finishes first. By default, item count has no separate cap beyond `DECIDEALOT_MAX_REQUEST_BYTES`; set `DECIDEALOT_MAX_BATCH_REQUESTS` to a positive number to reject larger batches with `422`. Set `DECIDEALOT_MAX_BATCH_CONCURRENCY` to a positive number to cap simultaneous provider calls made by batches without limiting batch length. This is a Decidealot extension, not a TypeSafe endpoint. The single-model endpoint keeps its existing response shape.
+
+```bash
+curl --fail --show-error "$base_url/v1/systemone/batch" \
+  --header 'Content-Type: application/json' \
+  --header "$auth_header" \
+  --data '{
+    "requests": [
+      {
+        "model": "laya",
+        "state": "A request would delete an audit record.",
+        "questions": {"review": {"type": "noul", "instructions": "Is human review needed?"}}
+      },
+      {
+        "model": "von",
+        "state": "A support request arrived with no account identifier.",
+        "questions": {"queue": {"type": "choice", "criteria": {"standard": "Normal queue", "review": "Needs manual routing"}}}
+      }
+    ]
+  }'
+```
+
+```json
+{
+  "results": [
+    {"model": "laya", "answers": {"review": {"type": "noul", "noul": 0.92}}, "usage": {"input_tokens": 21, "output_tokens": 0}},
+    {"model": "von-1.1", "answers": {"queue": {"type": "choice", "choice": "review", "confidence": 0.8, "probabilities": {"standard": 0.2, "review": 0.8}}}, "usage": {"input_tokens": 23, "output_tokens": 0}}
+  ]
+}
+```
+
+The numbers above illustrate the response shape, not a guaranteed model decision. Each `model` names the model that answered, which can differ from its requested alias. With one resident slot, Laya and Von wait and switch models rather than run together. CPU deployments with two slots may overlap them; CUDA inference remains serial. CLM and its Qwen encoder share the local serial lane by default. Set `DECIDEALOT_CLM_PARALLEL_WITH_LOCAL_MODELS=true` only when it is safe for CLM to overlap other local models, such as when Qwen runs on another machine. Hosted Jev can overlap local work. If any item fails, the batch returns its existing validation, busy, or unavailable error; it does not return partial results. Later requests for the same model may not be forwarded after one fails. The MCP `system_one_batch` tool takes the identical `{ "requests": [...] }` arguments and returns the identical structured result.
+
 ## CLM requests
 
 CLM uses the same request and response contract as Laya and Von. Set `model` to a CLM selector returned by `GET /v1/models`. It does not accept an endpoint URL in a request. The operator configures one fixed embeddings endpoint at startup, and every CLM request goes only there.
@@ -383,11 +419,32 @@ CLM uses the same request and response contract as Laya and Von. Set `model` to 
 
 CLM returns the normal TypeSafe answer shape. Its `usage.input_tokens` value is the `usage.prompt_tokens` reported by the configured embeddings endpoint. It has no output tokens.
 
+## Hosted Jev
+
+Set `DECIDEALOT_TYPESAFE_API_KEY` in the server's private environment. It enables Jev automatically unless `DECIDEALOT_JEV_ENABLED=false`. This key is for outbound TypeSafe calls; `DECIDEALOT_API_KEY` independently protects callers of Decidealot. The entire decision state and questions leave your host for TypeSafe. No request can choose another upstream URL.
+
+```json
+{
+  "model": "jev-latest",
+  "state": {"message": "Please review the attached invoice."},
+  "questions": {
+    "queue": {
+      "type": "choice",
+      "instructions": {"task": "Select the appropriate queue."},
+      "criteria": {"billing": "Invoices and payments", "general": "Other requests"}
+    },
+    "urgent": {"type": "noul", "instructions": "Does this need an immediate response?"}
+  }
+}
+```
+
+The response has the same `model`, `answers`, and `usage` fields as local decisions. TypeSafe reports which model answered, which can differ from the selected alias. Choice and Noul probabilities come from TypeSafe; Decidealot does not turn them into an allow or deny action. Hosted Jev does not load, unload, or switch a local provider. TypeSafe's published [OpenAPI contract](https://api.typesafe.ai/openapi.json) defines the upstream question and answer shapes.
+
 ## Unload loaded runtimes
 
-Decidealot permits at most one provider process in memory. Selecting another provider waits for an active request to finish, releases the old model, Torch runtime, and CUDA context, then starts the requested provider. A positive `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` also releases an idle provider. `0` turns off only the idle timer.
+Decidealot permits one local provider process in memory by default. Set `DECIDEALOT_MAX_RESIDENT_LOCAL_PROVIDERS` to `2` or `3` to keep more model families resident when RAM or VRAM permits. At capacity, selecting another local provider waits for an idle slot, releases the least recently used idle model, Torch runtime, and CUDA context, then starts the requested provider. This resident capacity does not make CUDA inference parallel. A positive `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` also releases idle local providers. `0` turns off only the idle timer. Hosted Jev has no local runtime to unload.
 
-`POST /v1/models/unload` is the one public unload operation. It is idempotent and releases every loaded provider. If any provider has an active decision request, it returns `409` and releases none.
+`POST /v1/models/unload` is the one public unload operation. It is idempotent and releases every loaded local provider. If any local provider has an active decision request, it returns `409` and releases none. A Jev request does not block local unload.
 
 ```bash
 curl --fail --show-error --request POST "$base_url/v1/models/unload" \
@@ -441,14 +498,14 @@ Failures outside that input contract use Decidealot's envelope:
 | `401` | `UNAUTHORIZED` | Authentication is configured but the Bearer token is absent or wrong. |
 | `409` | `PROVIDER_BUSY` | An unload was requested while a provider is serving a decision. |
 | `413` | `REQUEST_TOO_LARGE` | The JSON body exceeds `DECIDEALOT_MAX_REQUEST_BYTES`. |
-| `503` | `PROVIDER_UNAVAILABLE` | Startup preparation failed, a provider cannot start, times out, or gives an invalid response. |
+| `503` | `PROVIDER_UNAVAILABLE` | Startup preparation failed, a provider cannot start, times out, rejects authentication upstream, or gives an invalid response. |
 
 ```json
 {
   "code": "PROVIDER_UNAVAILABLE",
-  "message": "the selected local provider is unavailable",
+  "message": "the selected provider is unavailable",
   "details": {}
 }
 ```
 
-The model catalog restricts API callers to fixed configured local providers. Each decision request supplies a model alias, state, and questions.
+The model catalog restricts API callers to fixed configured providers. Each decision request supplies a model alias, state, and questions; it cannot supply a provider URL or upstream key.

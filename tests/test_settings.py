@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 import decidealot.settings as settings_module
 from decidealot.constants import (
@@ -21,6 +21,53 @@ def test_settings_exposes_no_model_location_or_default_model_configuration() -> 
     assert not hasattr(settings, "laya_model_dir")
     assert not hasattr(settings, "von_model_dir")
     assert not hasattr(settings, "default_model")
+
+
+@pytest.mark.parametrize("capacity", [0, 4, -1])
+def test_settings_rejects_invalid_resident_provider_capacity(capacity: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(max_resident_local_providers=capacity)
+
+
+def test_settings_batch_limit_defaults_to_zero_and_reads_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert Settings().max_batch_requests == 0
+    monkeypatch.setenv("DECIDEALOT_MAX_BATCH_REQUESTS", "12")
+    assert Settings().max_batch_requests == 12
+
+
+@pytest.mark.parametrize("value", [-1, "not-a-number"])
+def test_settings_rejects_invalid_batch_limit(value: object) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"max_batch_requests": value})
+
+
+def test_settings_batch_concurrency_defaults_to_zero_and_reads_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert Settings().max_batch_concurrency == 0
+    monkeypatch.setenv("DECIDEALOT_MAX_BATCH_CONCURRENCY", "2")
+    assert Settings().max_batch_concurrency == 2
+
+
+@pytest.mark.parametrize("value", [-1, "not-a-number"])
+def test_settings_rejects_invalid_batch_concurrency(value: object) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"max_batch_concurrency": value})
+
+
+def test_settings_clm_parallel_mode_defaults_off_and_reads_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert Settings().clm_parallel_with_local_models is False
+    monkeypatch.setenv("DECIDEALOT_CLM_PARALLEL_WITH_LOCAL_MODELS", "true")
+    assert Settings().clm_parallel_with_local_models is True
+
+
+def test_settings_rejects_invalid_clm_parallel_mode() -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"clm_parallel_with_local_models": "maybe"})
 
 
 def test_settings_enables_clm_only_when_an_embeddings_endpoint_is_configured() -> None:
@@ -54,6 +101,36 @@ def test_settings_supports_clm_as_the_only_enabled_provider() -> None:
     )
 
     assert settings.enabled_provider_names == ("clm",)
+
+
+def test_settings_enables_jev_from_a_private_typesafe_key_without_local_models() -> None:
+    settings = Settings(
+        laya_enabled=False,
+        von_enabled=False,
+        typesafe_api_key=SecretStr("upstream-secret"),
+    )
+
+    assert settings.enabled_provider_names == ("jev",)
+    assert settings.jev_enabled is True
+
+
+def test_settings_can_disable_jev_with_a_configured_key() -> None:
+    settings = Settings(typesafe_api_key=SecretStr("upstream-secret"), jev_enabled=False)
+
+    assert settings.enabled_provider_names == ("laya", "von")
+
+
+def test_settings_rejects_explicit_jev_without_an_upstream_key() -> None:
+    with pytest.raises(ValidationError, match="DECIDEALOT_TYPESAFE_API_KEY is required"):
+        Settings(jev_enabled=True)
+
+
+def test_settings_accepts_compose_auto_jev_setting() -> None:
+    settings = Settings.model_validate(
+        {"typesafe_api_key": "upstream-secret", "jev_enabled": "auto"}
+    )
+
+    assert settings.enabled_provider_names == ("laya", "von", "jev")
 
 
 @pytest.mark.parametrize(

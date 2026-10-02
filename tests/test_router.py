@@ -1,11 +1,18 @@
 """Model aliases select only the expected local native provider."""
 
 import pytest
+from pydantic import SecretStr
 
-from decidealot.constants import CLM_PROVIDER_NAME, LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
+from decidealot.constants import (
+    CLM_PROVIDER_NAME,
+    JEV_PROVIDER_NAME,
+    LAYA_PROVIDER_NAME,
+    VON_PROVIDER_NAME,
+)
 from decidealot.errors import UnknownModelError
 from decidealot.providers import ModelRouter
 from decidealot.settings import Settings
+from decidealot.typesafe import ModelMetadata
 
 
 @pytest.mark.parametrize(
@@ -86,3 +93,29 @@ def test_model_router_lists_and_resolves_clm_only_when_enabled() -> None:
     assert router.resolve("clm-latest").public_model == "clm-0.1-8b"
     with pytest.raises(UnknownModelError):
         router.resolve("laya")
+
+
+def test_model_router_resolves_only_discovered_hosted_models() -> None:
+    router = ModelRouter(
+        Settings(
+            laya_enabled=False,
+            von_enabled=False,
+            typesafe_api_key=SecretStr("upstream-secret"),
+        )
+    )
+
+    initial_models = router.supported_models
+    assert initial_models == ()
+    with pytest.raises(UnknownModelError):
+        router.resolve("jev-latest")
+    router.set_hosted_models(
+        (ModelMetadata(name="new-model", description="New model", release_date="2026-10-02"),)
+    )
+    assert router.supported_models == ("new-model",)
+    route = router.resolve("new-model")
+    assert route.provider_name == JEV_PROVIDER_NAME
+    assert route.public_model == "new-model"
+    assert route.upstream_model == "new-model"
+    assert route.is_local is False
+    with pytest.raises(UnknownModelError):
+        router.resolve("jev-latest")

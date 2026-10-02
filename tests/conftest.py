@@ -103,12 +103,38 @@ class FakeProvider:
     response: ProviderResponse
     unavailable: bool = False
     calls: list[tuple[dict[str, Any], str]] = field(default_factory=_empty_provider_calls)
+    model_catalog: ProviderResponse = field(
+        default_factory=lambda: ProviderResponse(
+            200,
+            {
+                "models": [
+                    {
+                        "name": "jev-latest",
+                        "description": "A hosted decision model",
+                        "release_date": "2026-09-10T18:38:01+00:00",
+                    },
+                    {
+                        "name": "jev-preview",
+                        "description": "A preview hosted decision model",
+                        "release_date": "2026-09-10T18:39:06+00:00",
+                    },
+                ]
+            },
+        )
+    )
+    catalog_calls: int = 0
 
     async def forward(self, payload: Mapping[str, Any], request_id: str) -> ProviderResponse:
         self.calls.append((dict(payload), request_id))
         if self.unavailable:
             raise ProviderUnavailableError("fake provider unavailable")
         return self.response
+
+    async def list_models(self) -> ProviderResponse:
+        self.catalog_calls += 1
+        if self.unavailable:
+            raise ProviderUnavailableError("fake provider unavailable")
+        return self.model_catalog
 
 
 def system_one_request(model: str = "laya") -> dict[str, Any]:

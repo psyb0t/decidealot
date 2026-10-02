@@ -1,7 +1,7 @@
 {
   "name": "decidealot",
-  "version": "0.5.0",
-  "description": "Run local Laya, Von, and CLM typed decisions through the Decidealot REST or MCP API.",
+  "version": "0.6.0",
+  "description": "Run local Laya, Von, and CLM or hosted Jev decisions through Decidealot REST or MCP.",
   "author": {
     "name": "psyb0t",
     "url": "https://github.com/psyb0t"
@@ -11,8 +11,8 @@
   "license": "WTFPL",
   "interface": {
     "displayName": "Decidealot",
-    "shortDescription": "Local typed decisions",
-    "longDescription": "Run local Laya, Von, and CLM models for TypeSafe-compatible choices, scores, and true or false decisions through REST or MCP.",
+    "shortDescription": "Local or hosted typed decisions",
+    "longDescription": "Run local Laya, Von, and CLM or hosted Jev for TypeSafe-compatible choices, scores, and true or false decisions through REST or MCP.",
     "developerName": "psyb0t",
     "category": "Developer Tools",
     "capabilities": [
@@ -23,7 +23,7 @@
       "Typed true or false decisions"
     ],
     "websiteURL": "https://github.com/psyb0t/decidealot",
-    "defaultPrompt": "Use Decidealot to evaluate the supplied state with the specified local model, then report the typed answer and its probabilities without taking an external action."
+    "defaultPrompt": "Use Decidealot to evaluate the supplied state with the specified model, then report the typed answer and its probabilities without taking an external action."
   },
   "keywords": [
     "local-ai",

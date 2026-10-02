@@ -1,5 +1,7 @@
 """Fixed local model paths must produce download-only preparation commands."""
 
+from pydantic import SecretStr
+
 from decidealot.constants import (
     CLM_PROVIDER_NAME,
     CLM_VENV_PYTHON,
@@ -69,3 +71,15 @@ def test_clm_spec_uses_the_laya_torch_runtime_and_fixed_embeddings_configuration
     )
     assert spec.environment["CLM_EMBEDDINGS_URL"] == "https://embeddings.example.test/v1/embeddings"
     assert spec.environment["CLM_EMBEDDINGS_MODEL"] == "qwen3-8b"
+
+
+def test_jev_only_configuration_has_no_local_process_or_download_steps() -> None:
+    supervisor = ProviderSupervisor(
+        Settings(
+            laya_enabled=False,
+            von_enabled=False,
+            typesafe_api_key=SecretStr("upstream-secret"),
+        )
+    )
+
+    assert supervisor.provider_specs == ()

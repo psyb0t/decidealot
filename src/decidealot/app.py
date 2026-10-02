@@ -21,6 +21,7 @@ from decidealot.constants import (
     MCP_PATH,
     MODELS_PATH,
     MODELS_UNLOAD_PATH,
+    SYSTEMONE_BATCH_PATH,
     SYSTEMONE_PATH,
 )
 from decidealot.decisions import DecisionService, Supervisor
@@ -64,7 +65,7 @@ def create_app(
     providers: Mapping[str, ProviderClient] | None = None,
     supervisor: Supervisor | None = None,
 ) -> FastAPI:
-    """Build a public router around fixed configured local provider endpoints."""
+    """Build a public router around fixed configured provider endpoints."""
 
     resolved_settings = settings or Settings()
     owns_http_client = providers is None
@@ -75,7 +76,15 @@ def create_app(
         resolved_providers = dict(providers)
     resolved_supervisor = supervisor or ProviderSupervisor(resolved_settings)
     model_router = ModelRouter(resolved_settings)
-    decisions = DecisionService(resolved_providers, resolved_supervisor, model_router)
+    decisions = DecisionService(
+        resolved_providers,
+        resolved_supervisor,
+        model_router,
+        resolved_settings.max_batch_requests,
+        resolved_settings.max_batch_concurrency,
+        resolved_settings.device,
+        resolved_settings.clm_parallel_with_local_models,
+    )
     mcp_server = create_mcp_server(decisions)
     configured_api_key = (
         resolved_settings.api_key.get_secret_value()
@@ -190,7 +199,7 @@ def create_app(
     @app.get(MODELS_PATH, status_code=status.HTTP_200_OK)
     async def models(request: Request) -> dict[str, Any]:
         _require_api_authentication(request, resolved_settings)
-        return decisions.model_catalog()
+        return await decisions.model_catalog()
 
     @app.post(MODELS_UNLOAD_PATH, status_code=status.HTTP_200_OK)
     async def unload_all_models(request: Request) -> JSONResponse:
@@ -203,6 +212,14 @@ def create_app(
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content=await decisions.system_one(body, request.state.request_id),
+        )
+
+    @app.post(SYSTEMONE_BATCH_PATH)
+    async def system_one_batch(request: Request, body: Any = Body(...)) -> JSONResponse:
+        _require_api_authentication(request, resolved_settings)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=await decisions.system_one_batch(body, request.state.request_id),
         )
 
     app.mount("/", mcp_app)

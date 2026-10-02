@@ -3,7 +3,7 @@
   "id": "@psyb0t/decidealot",
   "version": "0.0.0",
   "type": "code-plugin",
-  "summary": "Connect an OpenClaw agent to local Laya, Von, and CLM typed decisions over MCP.",
+  "summary": "Connect an OpenClaw agent to local Laya, Von, CLM, or hosted Jev decisions over MCP.",
   "description": "A thin stdio to HTTP bridge for a self-hosted Decidealot MCP endpoint. It forwards typed choice, score, and true or false decision calls to a Decidealot container that the user already runs.",
   "extensions": [
     "./bin/cli.js"

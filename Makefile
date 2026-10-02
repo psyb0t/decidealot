@@ -26,7 +26,7 @@ DEV_RUN_DIND := docker run --rm --init --user $(UID):$(GID) \
 	-v $(CURDIR):$(CURDIR) -w $(CURDIR) \
 	-v $(DOCKER_SOCK):$(DOCKER_SOCK) $(DEV_IMAGE)
 
-.PHONY: help dev-image dev-tools-image shell pkg-lock pkg-add pkg-update pkg-upgrade pkg-remove model-lock dep format lint lint-fix audit sec test test-unit test-integration test-coverage test-real test-real-cuda test-real-clm generate build build-cuda build-all build-test build-test-cuda run run-cuda restart restart-cuda stop status audit-compose audit-compose-cuda version clean
+.PHONY: help dev-image dev-tools-image shell pkg-lock pkg-add pkg-update pkg-upgrade pkg-remove model-lock dep format lint lint-fix audit sec test test-unit test-integration test-coverage test-real test-real-cuda test-real-clm test-real-jev generate build build-cuda build-all build-test build-test-cuda run run-cuda restart restart-cuda stop status audit-compose audit-compose-cuda version clean
 
 help: ## List supported operations
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -94,6 +94,13 @@ test-real-cuda: build-cuda ## Run real HTTP requests against downloaded CUDA Lay
 
 test-real-clm: build ## Run the real CLM head against a strict mock embeddings endpoint
 	bash tests/integration/e2e_clm.sh
+
+test-real-jev: dev-image ## Run one live hosted Jev decision with a private TypeSafe key
+	@test -n "$$DECIDEALOT_TYPESAFE_API_KEY" || { echo "DECIDEALOT_TYPESAFE_API_KEY is required" >&2; exit 2; }
+	docker run --rm --init --user $(UID):$(GID) -e HOME=/tmp \
+		-e PYTHONPATH=/work/src -e VIRTUAL_ENV=/opt/venv -e PATH=/opt/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+		-e DECIDEALOT_TYPESAFE_API_KEY -v $(CURDIR):/work -w /work $(DEV_IMAGE) \
+		python -m pytest -q -m real tests/real/test_jev_live.py
 
 generate: dev-image ## Regenerate every owned artifact
 	$(DEV_RUN) python scripts/generate.py

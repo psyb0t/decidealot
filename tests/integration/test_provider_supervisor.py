@@ -8,9 +8,13 @@ from pathlib import Path
 import httpx
 import pytest
 import pytest_asyncio
+from fastapi.testclient import TestClient
 
+from decidealot.app import create_app
+from decidealot.constants import LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
+from decidealot.decisions import DecisionService
 from decidealot.errors import ProviderBusyError, ProviderUnavailableError
-from decidealot.providers import HTTPProviderClient, ProviderResponse
+from decidealot.providers import HTTPProviderClient, ModelRouter, ProviderResponse
 from decidealot.settings import Settings
 from decidealot.supervisor import ProviderSpec, ProviderSupervisor
 
@@ -38,7 +42,8 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(
             {
                 'model': request['model'],
-                'answers': {'result': {'value': 'allow', 'probability': 0.99}},
+                'answers': {'result': {'type': 'noul', 'noul': 0.99}},
+                'usage': {'input_tokens': 4, 'output_tokens': 0},
             }
         ).encode()
         self.send_response(200)
@@ -109,7 +114,8 @@ async def test_supervisor_starts_no_provider_until_the_selected_provider_is_acqu
     assert unloaded_after_use.was_loaded
     assert response.body == {
         "model": "fixture",
-        "answers": {"result": {"value": "allow", "probability": 0.99}},
+        "answers": {"result": {"type": "noul", "noul": 0.99}},
+        "usage": {"input_tokens": 4, "output_tokens": 0},
     }
 
 
@@ -314,6 +320,184 @@ async def test_supervisor_waits_for_an_active_provider_before_switching_models(
         await supervisor.stop()
 
     assert second_response.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_two_local_providers_can_answer_while_both_are_acquired(
+    unused_tcp_port_factory: Callable[[], int],
+) -> None:
+    first_port = unused_tcp_port_factory()
+    second_port = unused_tcp_port_factory()
+    supervisor = ProviderSupervisor(
+        Settings(max_resident_local_providers=2, provider_start_timeout_seconds=3),
+        specs=(
+            _provider_spec(_first_provider_name, first_port),
+            _provider_spec(_second_provider_name, second_port),
+        ),
+    )
+    await supervisor.start()
+    try:
+        async with httpx.AsyncClient(trust_env=False) as client:
+            first_provider = HTTPProviderClient(
+                _first_provider_name,
+                f"http://{_loopback_host}:{first_port}/v1/systemone",
+                client,
+            )
+            second_provider = HTTPProviderClient(
+                _second_provider_name,
+                f"http://{_loopback_host}:{second_port}/v1/systemone",
+                client,
+            )
+            async with supervisor.acquire(_first_provider_name):
+                async with asyncio.timeout(2):
+                    async with supervisor.acquire(_second_provider_name):
+                        first, second = await asyncio.gather(
+                            first_provider.forward({"model": "first"}, _request_id),
+                            second_provider.forward({"model": "second"}, _request_id),
+                        )
+                        assert first.status_code == 200
+                        assert second.status_code == 200
+                        with pytest.raises(ProviderBusyError):
+                            await supervisor.unload_all()
+            unloaded = await supervisor.unload_all()
+    finally:
+        await supervisor.stop()
+
+    assert [result.was_loaded for result in unloaded] == [True, True]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("resident_capacity", "expected_loaded"),
+    [(1, [False, True]), (2, [True, True])],
+)
+def test_batch_http_wiring_runs_two_owned_local_servers(
+    unused_tcp_port_factory: Callable[[], int],
+    resident_capacity: int,
+    expected_loaded: list[bool],
+) -> None:
+    first_port = unused_tcp_port_factory()
+    second_port = unused_tcp_port_factory()
+    settings = Settings(
+        max_resident_local_providers=resident_capacity,
+        provider_start_timeout_seconds=3,
+    )
+    supervisor = ProviderSupervisor(
+        settings,
+        specs=(
+            _provider_spec(LAYA_PROVIDER_NAME, first_port),
+            _provider_spec(VON_PROVIDER_NAME, second_port),
+        ),
+    )
+    http_client = httpx.AsyncClient(trust_env=False)
+    providers = {
+        LAYA_PROVIDER_NAME: HTTPProviderClient(
+            LAYA_PROVIDER_NAME,
+            f"http://{_loopback_host}:{first_port}/v1/systemone",
+            http_client,
+        ),
+        VON_PROVIDER_NAME: HTTPProviderClient(
+            VON_PROVIDER_NAME,
+            f"http://{_loopback_host}:{second_port}/v1/systemone",
+            http_client,
+        ),
+    }
+    app = create_app(settings, providers, supervisor)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/systemone/batch",
+                json={
+                    "requests": [
+                        {
+                            "model": "laya",
+                            "state": "First case",
+                            "questions": {"result": {"type": "noul"}},
+                        },
+                        {
+                            "model": "von",
+                            "state": "Second case",
+                            "questions": {"result": {"type": "noul"}},
+                        },
+                    ]
+                },
+            )
+            assert response.status_code == 200
+            assert response.json() == {
+                "results": [
+                    {
+                        "model": "laya",
+                        "answers": {"result": {"type": "noul", "noul": 0.99}},
+                        "usage": {"input_tokens": 4, "output_tokens": 0},
+                    },
+                    {
+                        "model": "von-1.1",
+                        "answers": {"result": {"type": "noul", "noul": 0.99}},
+                        "usage": {"input_tokens": 4, "output_tokens": 0},
+                    },
+                ]
+            }
+            unload_response = client.post("/v1/models/unload")
+            assert unload_response.status_code == 200
+            assert [
+                item["wasLoaded"] for item in unload_response.json()["providers"]
+            ] == expected_loaded
+    finally:
+        asyncio.run(http_client.aclose())
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_cancelled_batch_releases_its_local_provider_lease(
+    unused_tcp_port: int,
+) -> None:
+    entered = asyncio.Event()
+
+    class WaitingProvider:
+        async def forward(self, payload: object, request_id: str) -> ProviderResponse:
+            del payload, request_id
+            entered.set()
+            await asyncio.Future[None]()
+            raise AssertionError("unreachable")
+
+    settings = Settings(provider_start_timeout_seconds=3)
+    supervisor = ProviderSupervisor(
+        settings, specs=(_provider_spec(LAYA_PROVIDER_NAME, unused_tcp_port),)
+    )
+    decisions = DecisionService(
+        {LAYA_PROVIDER_NAME: WaitingProvider()},
+        supervisor,
+        ModelRouter(settings),
+        settings.max_batch_requests,
+        settings.max_batch_concurrency,
+        settings.device,
+        settings.clm_parallel_with_local_models,
+    )
+    await supervisor.start()
+    try:
+        task = asyncio.create_task(
+            decisions.system_one_batch(
+                {
+                    "requests": [
+                        {
+                            "model": "laya",
+                            "state": "Review this",
+                            "questions": {"result": {"type": "noul"}},
+                        }
+                    ]
+                },
+                _request_id,
+            )
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        unloaded = await supervisor.unload_all()
+        assert unloaded[0].was_loaded
+    finally:
+        await supervisor.stop()
 
 
 @pytest.mark.asyncio

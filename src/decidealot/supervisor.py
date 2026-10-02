@@ -128,13 +128,20 @@ class ProviderSupervisor:
             if not self._started:
                 raise ProviderUnavailableError("local providers are not ready")
             spec = self._require_spec(provider_name)
-            while self._has_active_other_provider(provider_name):
+            while (
+                provider_name not in self._processes
+                and len(self._processes) >= self._settings.max_resident_local_providers
+            ):
+                idle_candidates = [
+                    name for name in self._processes if self._active_requests[name] == 0
+                ]
+                if idle_candidates:
+                    oldest = min(idle_candidates, key=lambda name: self._last_used_at.get(name, 0))
+                    await self._stop_provider_locked(oldest, reason="model_switch")
+                    continue
                 await self._provider_switch_condition.wait()
                 if not self._started:
                     raise ProviderUnavailableError("local providers are not ready")
-            if not self._started:
-                raise ProviderUnavailableError("local providers are not ready")
-            await self._unload_other_idle_providers_locked(provider_name)
             await self._start_provider_locked(spec)
             self._active_requests[provider_name] += 1
         try:
@@ -222,20 +229,6 @@ class ProviderSupervisor:
         self._idle_reaper_task = asyncio.create_task(
             self._idle_reaper(), name="decidealot-provider-idle-reaper"
         )
-
-    def _has_active_other_provider(self, selected_provider_name: str) -> bool:
-        return any(
-            provider_name != selected_provider_name and active_requests > 0
-            for provider_name, active_requests in self._active_requests.items()
-        )
-
-    async def _unload_other_idle_providers_locked(self, selected_provider_name: str) -> None:
-        for provider_name in tuple(self._processes):
-            if provider_name == selected_provider_name:
-                continue
-            if self._active_requests[provider_name] > 0:
-                raise RuntimeError("cannot replace an active local provider")
-            await self._stop_provider_locked(provider_name, reason="model_switch")
 
     async def _start_provider_locked(self, spec: ProviderSpec) -> None:
         process = self._processes.get(spec.name)

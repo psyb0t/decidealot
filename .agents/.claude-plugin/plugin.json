@@ -1,6 +1,6 @@
 {
   "name": "decidealot",
-  "description": "Run local Laya, Von, and CLM typed decisions through the Decidealot REST or MCP API.",
+  "description": "Run local Laya, Von, and CLM or hosted Jev decisions through Decidealot REST or MCP.",
   "author": {
     "name": "psyb0t",
     "url": "https://github.com/psyb0t"

@@ -13,7 +13,7 @@ class InvalidRequestError(DecidealotError):
 
 
 class UnknownModelError(InvalidRequestError):
-    """The requested model selector is not supported locally."""
+    """The requested model selector is not supported by this deployment."""
 
 
 class TypeSafeValidationError(DecidealotError):
@@ -33,7 +33,7 @@ class UnauthorizedError(DecidealotError):
 
 
 class ProviderUnavailableError(DecidealotError):
-    """The selected local provider cannot currently serve a request."""
+    """The selected provider cannot currently serve a request."""
 
 
 class ProviderBusyError(DecidealotError):

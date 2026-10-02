@@ -19,7 +19,7 @@ export DECIDEALOT_URL=http://127.0.0.1:8080
 export DECIDEALOT_API_KEY=your-token-here
 ```
 
-The service exposes `system_one`, `list_models`, and `unload_models`. `system_one` uses the same `model`, `state`, and `questions` arguments as the REST API. `list_models` returns the Laya, Von, and CLM selectors enabled by the running deployment. `list_models` and `unload_models` take no arguments. Read the [Decidealot API guide](https://github.com/psyb0t/decidealot/blob/main/docs/api.md#mcp-streamable-http) for input, structured output, and MCP error shapes.
+The service exposes `system_one`, `system_one_batch`, `list_models`, and `unload_models`. `system_one` uses the same `model`, `state`, and `questions` arguments as the REST API. `system_one_batch` takes a list of complete requests and returns ordered named results. `list_models` returns the Laya, Von, CLM, and hosted Jev selectors enabled by the deployment. Jev sends decision state and questions to TypeSafe, with the upstream key kept inside the Decidealot service. `unload_models` affects local models only. `list_models` and `unload_models` take no arguments. Read the [Decidealot API guide](https://github.com/psyb0t/decidealot/blob/main/docs/api.md#mcp-streamable-http) for input, structured output, and MCP error shapes.
 
 ## Native remote MCP
 

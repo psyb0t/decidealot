@@ -102,7 +102,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 
 class RequestSizeMiddleware(BaseHTTPMiddleware):
-    """Reject oversized JSON requests before they reach a local model."""
+    """Reject oversized JSON requests before they reach a model."""
 
     def __init__(self, app: ASGIApp, max_request_bytes: int) -> None:
         super().__init__(app)

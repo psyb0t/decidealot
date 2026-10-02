@@ -1,6 +1,6 @@
 ---
 name: "decidealot"
-description: "Run local Laya, Von, or CLM typed classification, scoring, and true-or-false decisions through Decidealot REST or MCP. Use when a user needs a bounded decision with probabilities, wants to deploy the Docker image, inspect configured model aliases, or release model memory."
+description: "Run local Laya, Von, CLM, or hosted Jev typed decisions through Decidealot REST or MCP. Use for bounded classification or scoring, Docker deployment, model selection, or local model unloading."
 homepage: "https://github.com/psyb0t/decidealot"
 metadata:
   openclaw:
@@ -17,7 +17,7 @@ user-invocable: true
 
 # Decidealot
 
-Decidealot runs configured Laya, Von, and CLM providers locally. It turns supplied state into typed `choice`, `score`, or `noul` results with probabilities. CLM is a local projection head over one configured Qwen3-8B embeddings endpoint. The caller applies the threshold and any action that follows.
+Decidealot runs Laya, Von, and CLM locally, or calls TypeSafe's hosted Jev when configured. It turns supplied state into typed `choice`, `score`, or `noul` results with probabilities. CLM is a local projection head over one configured Qwen3-8B embeddings endpoint. The caller applies the threshold and any action that follows.
 
 Use a running Decidealot endpoint. Clone or build this repository only for Decidealot development work.
 
@@ -25,12 +25,13 @@ Read [references/setup.md](references/setup.md) before deploying a container or 
 
 ## Security & safety
 
-- Treat a decision as evidence, not authority. A local model cannot grant permission to delete, send, deploy, trade, or alter external state.
+- Treat a decision as evidence, not authority. No model can grant permission to delete, send, deploy, trade, or alter external state.
 - Keep authorization, ownership, irreversible-action checks, and final thresholds in the caller. For costly mistakes, route uncertainty to human review.
 - Send user data only to the endpoint the user named. Never search workspace files for `DECIDEALOT_API_KEY` or create an unauthenticated public endpoint.
-- Every decision request needs an explicit local `model` selector from `GET /v1/models`.
+- Every decision request needs an explicit `model` selector from `GET /v1/models`.
 - CLM sends decision state and criteria to its configured embeddings endpoint. Use it only when the endpoint is controlled or trusted and returns Qwen3-8B last-token embeddings with width `4096`.
-- `unload_models` evicts the loaded model and Torch runtime. Use it only when the user asks to free memory.
+- Jev sends the full state and questions to TypeSafe's hosted API. Confirm that the data may leave the host before selecting any TypeSafe model returned by `GET /v1/models`. Never put the upstream TypeSafe key in a decision request.
+- `unload_models` evicts only a loaded local model and Torch runtime. Use it only when the user asks to free memory.
 
 ## When to use
 
@@ -48,7 +49,7 @@ Use Decidealot for bounded classification, scoring, and true-or-false decisions.
 
 ## REST and MCP
 
-REST uses `POST /v1/systemone`, `GET /v1/models`, and `POST /v1/models/unload`. MCP is at `/mcp` and exposes `system_one`, `list_models`, and `unload_models` with the same input and result shapes. Read [references/setup.md](references/setup.md) for exact deployment, authentication, REST, MCP, and bridge commands. Read the public [API guide](https://github.com/psyb0t/decidealot/blob/main/docs/api.md) before constructing an unfamiliar question type.
+REST uses `POST /v1/systemone` for one decision and `POST /v1/systemone/batch` for independent decisions, plus `GET /v1/models` and `POST /v1/models/unload`. MCP is at `/mcp` and exposes matching `system_one`, `system_one_batch`, `list_models`, and `unload_models` tools. A batch uses `{"requests":[{"model":...,"state":...,"questions":...}]}` and returns ordered `results`; do not assume all items share the same state. Read [references/setup.md](references/setup.md) for exact deployment, upstream Jev key handling, authentication, REST, MCP, and bridge commands. Read the public [API guide](https://github.com/psyb0t/decidealot/blob/main/docs/api.md) before constructing an unfamiliar question type.
 
 ## Completion
 

@@ -1,7 +1,7 @@
 [project]
 name = "decidealot"
-version = "0.5.0"
-description = "Run local System One decision models behind one TypeSafe-compatible HTTP endpoint."
+version = "0.6.0"
+description = "Run local or hosted System One decision models behind one TypeSafe-compatible HTTP endpoint."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Ciprian Mandache", email = "psyb0t@51k.eu" }]
@@ -69,7 +69,7 @@ testpaths = ["tests"]
 addopts = "-v --tb=short -m 'not integration and not real' --ignore=.research_files"
 markers = [
     "integration: production-component integration checks that launch local processes",
-    "real: opt-in tests that download and run the actual Laya and Von weights",
+    "real: opt-in tests that run actual local weights or a hosted provider",
 ]
 
 [tool.coverage.run]

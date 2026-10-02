@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from decidealot.errors import ProviderUnavailableError
 from decidealot.providers import HTTPProviderClient, default_provider_clients
@@ -124,3 +125,82 @@ async def test_default_provider_clients_only_create_configured_loopback_targets(
         assert set(providers) == {"clm"}
     finally:
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_hosted_jev_client_sends_private_key_only_to_the_fixed_typesafe_endpoint() -> None:
+    observed_request: httpx.Request | None = None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal observed_request
+        observed_request = request
+        return httpx.Response(200, json={"model": "jev-latest", "answers": {}, "usage": {}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        client = HTTPProviderClient(
+            "jev",
+            "https://api.typesafe.ai/v1/systemone",
+            transport,
+            SecretStr("upstream-secret"),
+        )
+        await client.forward({"model": "jev-latest", "state": "test"}, "request-123")
+
+    assert observed_request is not None
+    assert str(observed_request.url) == "https://api.typesafe.ai/v1/systemone"
+    assert observed_request.headers["Authorization"] == "Bearer upstream-secret"
+    assert observed_request.headers["X-Request-Id"] == "request-123"
+    assert b"upstream-secret" not in observed_request.content
+
+
+@pytest.mark.asyncio
+async def test_hosted_jev_authentication_failure_does_not_expose_upstream_body() -> None:
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": "sensitive upstream account detail"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        client = HTTPProviderClient(
+            "jev", "https://api.typesafe.ai/v1/systemone", transport, SecretStr("upstream-secret")
+        )
+        result = await client.forward({"model": "jev-latest"}, "request-123")
+
+    assert result.status_code == 401
+    assert result.body == {"detail": "sensitive upstream account detail"}
+
+
+@pytest.mark.asyncio
+async def test_hosted_model_discovery_uses_the_fixed_authenticated_endpoint() -> None:
+    observed_request: httpx.Request | None = None
+    catalog = {
+        "models": [{"name": "new-model", "description": "New", "release_date": "2026-10-02"}]
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal observed_request
+        observed_request = request
+        return httpx.Response(200, json=catalog)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        client = HTTPProviderClient(
+            "jev", "https://api.typesafe.ai/v1/systemone", transport, SecretStr("upstream-secret")
+        )
+        response = await client.list_models()
+
+    assert response.body == catalog
+    assert observed_request is not None
+    assert observed_request.method == "GET"
+    assert str(observed_request.url) == "https://api.typesafe.ai/v1/models"
+    assert observed_request.headers["Authorization"] == "Bearer upstream-secret"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [401, 403, 429, 500])
+async def test_hosted_model_discovery_hides_upstream_failures(status_code: int) -> None:
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code, json={"detail": "private account data"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        client = HTTPProviderClient(
+            "jev", "https://api.typesafe.ai/v1/systemone", transport, SecretStr("upstream-secret")
+        )
+        with pytest.raises(ProviderUnavailableError, match="catalog is unavailable"):
+            await client.list_models()

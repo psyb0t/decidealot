@@ -1,8 +1,8 @@
-"""The official TypeSafe System One request, response, and validation contract.
+"""The TypeSafe System One contract plus Decidealot's batch envelope.
 
-Every model here mirrors a schema in the published TypeSafe OpenAPI document. The
-boundary validates untrusted requests against them and projects native provider
-results back through them, so no provider-only field reaches a caller.
+System One models mirror the published TypeSafe OpenAPI document. The separate
+batch models wrap those requests and results without changing the official
+single-request contract. Native provider-only fields never reach a caller.
 """
 
 import logging
@@ -26,8 +26,8 @@ QUESTIONS_LOCATION = (BODY_LOCATION, "questions")
 _detail_fields = ("loc", "msg", "type", "input", "ctx")
 _value_error_type = "value_error"
 _value_error_prefix = "Value error, "
-_invalid_provider_response_message = "the selected local provider returned an invalid response"
-_provider_rejected_request_message = "the selected local provider rejected the request"
+_invalid_provider_response_message = "the selected provider returned an invalid response"
+_provider_rejected_request_message = "the selected provider rejected the request"
 
 
 class NoulCriteria(BaseModel):
@@ -70,6 +70,12 @@ class SystemOneRequest(BaseModel):
     state: JSONValue
     model: str
     questions: dict[str, Question] = Field(min_length=1)
+
+
+class SystemOneBatchRequest(BaseModel):
+    """Independent System One requests evaluated as one batch."""
+
+    requests: list[SystemOneRequest] = Field(min_length=1)
 
 
 class NoulAnswer(BaseModel):
@@ -116,6 +122,12 @@ class SystemOneResponse(BaseModel):
     usage: Usage
 
 
+class SystemOneBatchResponse(BaseModel):
+    """One result for each request, preserving input order."""
+
+    results: list[SystemOneResponse]
+
+
 class ModelMetadata(BaseModel):
     """A model or model alias available to the authenticated account."""
 
@@ -159,6 +171,30 @@ def parse_system_one_request(body: object) -> SystemOneRequest:
         ) from error
 
 
+def parse_system_one_batch_request(
+    body: object, max_batch_requests: int = 0
+) -> SystemOneBatchRequest:
+    """Validate every batch item before any provider receives work."""
+
+    try:
+        batch = SystemOneBatchRequest.model_validate(body)
+    except ValidationError as error:
+        raise TypeSafeValidationError(
+            validation_detail(error.errors(), (BODY_LOCATION,))
+        ) from error
+    if max_batch_requests and len(batch.requests) > max_batch_requests:
+        raise TypeSafeValidationError(
+            [
+                {
+                    "loc": [BODY_LOCATION, "requests"],
+                    "msg": f"List should have at most {max_batch_requests} items",
+                    "type": "too_long",
+                }
+            ]
+        )
+    return batch
+
+
 def validation_detail(
     errors: Iterable[Mapping[str, Any]],
     location_prefix: tuple[str, ...] = (),
@@ -190,12 +226,13 @@ def validation_error_content(detail: Iterable[Mapping[str, Any]]) -> dict[str, A
     return {"detail": jsonable_encoder(list(detail))}
 
 
-def project_system_one_response(body: object, model_name: str) -> dict[str, Any]:
+def project_system_one_response(body: object, model_name: str | None) -> dict[str, Any]:
     """Reduce a native provider result to the official model, answers, and usage.
 
-    The reported model is the public Decidealot name of the backend that answered,
-    which the official schema allows to differ from the requested alias. Provider-only
-    fields such as routing decisions and per-answer action metadata are dropped.
+    Local providers report the public Decidealot name. Hosted providers keep the
+    upstream model that actually answered, which may differ from the request alias.
+    Provider-only fields such as routing decisions and per-answer action metadata
+    are dropped.
 
     Raises ProviderUnavailableError when the provider result cannot satisfy the
     official response schema.
@@ -203,13 +240,14 @@ def project_system_one_response(body: object, model_name: str) -> dict[str, Any]
 
     answered = _as_json_object(body)
     if answered is None:
-        logger.warning("local provider response is not an object")
+        logger.warning("provider response is not an object")
         raise ProviderUnavailableError(_invalid_provider_response_message)
     try:
-        response = SystemOneResponse.model_validate({**answered, "model": model_name})
+        response_body = {**answered, "model": model_name} if model_name is not None else answered
+        response = SystemOneResponse.model_validate(response_body)
     except ValidationError as error:
         logger.warning(
-            "local provider response does not match the official schema",
+            "provider response does not match the official schema",
             extra={"error_count": error.error_count()},
         )
         raise ProviderUnavailableError(_invalid_provider_response_message) from error
@@ -228,7 +266,7 @@ def provider_validation_content(body: object) -> dict[str, Any]:
     if reported is not None and _is_official_validation_envelope(reported):
         return dict(reported)
     logger.info(
-        "restating a local provider validation failure",
+        "restating a provider validation failure",
         extra={"reason": "provider_detail_not_official"},
     )
     return validation_error_content(

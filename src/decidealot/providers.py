@@ -1,16 +1,20 @@
-"""Model selection, native request adaptation, and safe loopback forwarding."""
+"""Model selection, native request adaptation, and fixed-endpoint forwarding."""
 
 import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
+from pydantic import SecretStr
 
 from decidealot.constants import (
     CLM_PROVIDER_NAME,
     CLM_SYSTEMONE_URL,
+    JEV_MODELS_URL,
+    JEV_PROVIDER_NAME,
+    JEV_SYSTEMONE_URL,
     LAYA_PROVIDER_NAME,
     LAYA_SYSTEMONE_URL,
     REQUEST_ID_HEADER,
@@ -87,9 +91,16 @@ class ProviderClient(Protocol):
     """The narrow external-model boundary used by the application service."""
 
     async def forward(self, payload: Mapping[str, Any], request_id: str) -> ProviderResponse:
-        """Forward one native request to the provider's fixed loopback URL."""
+        """Forward one native request to the provider's fixed endpoint."""
 
         ...
+
+
+@runtime_checkable
+class HostedCatalogClient(ProviderClient, Protocol):
+    """The hosted provider's authenticated model discovery boundary."""
+
+    async def list_models(self) -> ProviderResponse: ...
 
 
 @dataclass(frozen=True)
@@ -99,55 +110,88 @@ class ModelRoute:
     provider_name: str
     public_model: str
     upstream_model: str
+    is_local: bool = True
 
 
 class HTTPProviderClient:
-    """A non-redirecting client for one fixed local model endpoint."""
+    """A non-redirecting client for one fixed model endpoint."""
 
-    def __init__(self, provider_name: str, endpoint_url: str, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        provider_name: str,
+        endpoint_url: str,
+        client: httpx.AsyncClient,
+        api_key: SecretStr | None = None,
+    ) -> None:
         self._provider_name = provider_name
         self._endpoint_url = endpoint_url
         self._client = client
+        self._api_key = api_key
 
     async def forward(self, payload: Mapping[str, Any], request_id: str) -> ProviderResponse:
         try:
+            headers = {REQUEST_ID_HEADER: request_id}
+            if self._api_key is not None:
+                headers["Authorization"] = f"Bearer {self._api_key.get_secret_value()}"
             response = await self._client.post(
                 self._endpoint_url,
-                headers={REQUEST_ID_HEADER: request_id},
+                headers=headers,
                 json=dict(payload),
             )
         except httpx.TimeoutException as error:
             logger.warning(
-                "local provider timed out",
-                extra={"provider": self._provider_name, "error": str(error)},
+                "provider timed out",
+                extra={"provider": self._provider_name, "error_type": type(error).__name__},
             )
-            raise ProviderUnavailableError("the selected local provider timed out") from error
+            raise ProviderUnavailableError("the selected provider timed out") from error
         except httpx.HTTPError as error:
             logger.warning(
-                "local provider request failed",
-                extra={"provider": self._provider_name, "error": str(error)},
+                "provider request failed",
+                extra={"provider": self._provider_name, "error_type": type(error).__name__},
             )
-            raise ProviderUnavailableError("the selected local provider is unavailable") from error
+            raise ProviderUnavailableError("the selected provider is unavailable") from error
 
         if response.status_code >= 500:
             logger.warning(
-                "local provider returned server error",
+                "provider returned server error",
                 extra={"provider": self._provider_name, "status_code": response.status_code},
             )
-            raise ProviderUnavailableError("the selected local provider is unavailable")
+            raise ProviderUnavailableError("the selected provider is unavailable")
 
         try:
             body = response.json()
         except ValueError as error:
             logger.warning(
-                "local provider returned non-json response",
+                "provider returned non-json response",
                 extra={"provider": self._provider_name, "status_code": response.status_code},
             )
             raise ProviderUnavailableError(
-                "the selected local provider returned an invalid response"
+                "the selected provider returned an invalid response"
             ) from error
 
         return ProviderResponse(status_code=response.status_code, body=body)
+
+    async def list_models(self) -> ProviderResponse:
+        """Read the authenticated TypeSafe catalog from its fixed endpoint."""
+
+        if self._provider_name != JEV_PROVIDER_NAME:
+            raise ProviderUnavailableError("model discovery is unavailable for this provider")
+        if self._api_key is None:
+            raise ProviderUnavailableError("the selected provider is not configured")
+        try:
+            response = await self._client.get(
+                JEV_MODELS_URL,
+                headers={"Authorization": f"Bearer {self._api_key.get_secret_value()}"},
+            )
+            if response.status_code != 200:
+                raise ProviderUnavailableError("the hosted model catalog is unavailable")
+            return ProviderResponse(status_code=200, body=response.json())
+        except (httpx.HTTPError, ValueError) as error:
+            logger.warning(
+                "hosted model catalog request failed",
+                extra={"provider": self._provider_name, "error_type": type(error).__name__},
+            )
+            raise ProviderUnavailableError("the hosted model catalog is unavailable") from error
 
 
 class ModelRouter:
@@ -155,13 +199,28 @@ class ModelRouter:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self._enabled_provider_names = frozenset((settings or Settings()).enabled_provider_names)
+        self._hosted_models: tuple[ModelMetadata, ...] = ()
+
+    @property
+    def hosted_enabled(self) -> bool:
+        return JEV_PROVIDER_NAME in self._enabled_provider_names
+
+    def set_hosted_models(self, models: tuple[ModelMetadata, ...]) -> None:
+        """Replace the authenticated upstream catalog after complete validation."""
+
+        self._hosted_models = models
 
     @property
     def supported_models(self) -> tuple[str, ...]:
         return tuple(entry.name for entry in self.catalog())
 
     def catalog(self) -> tuple[ModelMetadata, ...]:
-        """Describe every accepted selector with the release date of its local model."""
+        """Describe every accepted selector and its advertised release date."""
+
+        return (*self.local_catalog(), *self._hosted_models)
+
+    def local_catalog(self) -> tuple[ModelMetadata, ...]:
+        """Describe selectors served by this deployment's local providers."""
 
         return (
             *self._enabled_metadata(
@@ -182,7 +241,7 @@ class ModelRouter:
         )
 
     def resolve(self, requested_model: str) -> ModelRoute:
-        """Resolve a public model selector to a fixed local backend."""
+        """Resolve a public model selector to a fixed backend."""
 
         is_laya_enabled = LAYA_PROVIDER_NAME in self._enabled_provider_names
         if is_laya_enabled and requested_model in _laya_auto_aliases:
@@ -198,6 +257,13 @@ class ModelRouter:
             return self._von_route()
         if CLM_PROVIDER_NAME in self._enabled_provider_names and requested_model in _clm_aliases:
             return self._clm_route()
+        if self.hosted_enabled and requested_model in {model.name for model in self._hosted_models}:
+            return ModelRoute(
+                provider_name=JEV_PROVIDER_NAME,
+                public_model=requested_model,
+                upstream_model=requested_model,
+                is_local=False,
+            )
         raise UnknownModelError(f"unsupported model {requested_model!r}")
 
     @staticmethod
@@ -246,7 +312,7 @@ class ModelRouter:
 
 
 def native_provider_payload(route: ModelRoute, request: SystemOneRequest) -> dict[str, Any]:
-    """Build the native body that both local providers accept for a valid request.
+    """Build the native body for local models or preserve the official Jev request.
 
     Laya requires an instructions field on every question and Von requires it to be a
     string, while the official schema makes it optional and allows nested JSON. Nested
@@ -258,6 +324,8 @@ def native_provider_payload(route: ModelRoute, request: SystemOneRequest) -> dic
         "model request routed",
         extra={"provider": route.provider_name, "model": route.upstream_model},
     )
+    if not route.is_local:
+        return {**request.model_dump(mode="json"), "model": route.upstream_model}
     return {
         "model": route.upstream_model,
         "state": request.state,
@@ -317,7 +385,7 @@ def _native_text(value: JSONValue) -> str:
 def default_provider_clients(
     settings: Settings,
 ) -> tuple[dict[str, ProviderClient], httpx.AsyncClient]:
-    """Create the app-owned HTTP client and fixed local provider clients."""
+    """Create the app-owned HTTP client and fixed provider clients."""
 
     client = httpx.AsyncClient(
         timeout=httpx.Timeout(settings.request_timeout_seconds),
@@ -328,9 +396,15 @@ def default_provider_clients(
         LAYA_PROVIDER_NAME: LAYA_SYSTEMONE_URL,
         VON_PROVIDER_NAME: VON_SYSTEMONE_URL,
         CLM_PROVIDER_NAME: CLM_SYSTEMONE_URL,
+        JEV_PROVIDER_NAME: JEV_SYSTEMONE_URL,
     }
     providers: dict[str, ProviderClient] = {
-        provider_name: HTTPProviderClient(provider_name, provider_urls[provider_name], client)
+        provider_name: HTTPProviderClient(
+            provider_name,
+            provider_urls[provider_name],
+            client,
+            settings.typesafe_api_key if provider_name == JEV_PROVIDER_NAME else None,
+        )
         for provider_name in settings.enabled_provider_names
     }
     return providers, client

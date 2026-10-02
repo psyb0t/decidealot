@@ -24,7 +24,7 @@ docker run --detach --name decidealot --init --restart unless-stopped \
   psyb0t/decidealot:latest
 ```
 
-On a fresh directory Decidealot downloads and verifies every enabled provider bundle before `/health` returns `200`. Laya and Von are enabled by default. CLM becomes enabled when its embeddings endpoint is configured. This can take minutes. Decidealot keeps neither model nor Torch loaded after preparation. Later starts verify existing bundles and download only missing files.
+On a fresh directory Decidealot downloads and verifies every enabled local provider bundle before `/health` returns `200`. Laya and Von are enabled by default. CLM becomes enabled when its embeddings endpoint is configured. This can take minutes. Decidealot keeps neither model nor Torch loaded after preparation. Later starts verify existing bundles and download only missing files. Hosted Jev needs no bundle and becomes available when its TypeSafe key is configured.
 
 ## Configuration
 
@@ -34,6 +34,9 @@ Pass configuration with Docker `--env-file` or your container manager. The image
 | --- | --- | --- |
 | `DECIDEALOT_API_KEY` | empty | Optional Bearer token for every public HTTP API and MCP request except `/health`. |
 | `DECIDEALOT_PROVIDER_IDLE_UNLOAD_SECONDS` | `600` | Seconds without a request before automatic unload. `0` disables the idle timer. |
+| `DECIDEALOT_MAX_RESIDENT_LOCAL_PROVIDERS` | `1` | Maximum simultaneous local model processes, `1` to `3`. Raise only after sizing RAM or VRAM for the selected models. |
+| `DECIDEALOT_MAX_BATCH_REQUESTS` | `0` | Optional maximum number of batch items. `0` means no item-count cap; the body-size limit still applies. |
+| `DECIDEALOT_MAX_BATCH_CONCURRENCY` | `0` | Optional cap on simultaneous provider calls made by batches. `0` leaves model and device scheduling as the only concurrency limits. |
 | `DECIDEALOT_LAYA_ENABLED` | `true` | Download and expose Laya selectors. |
 | `DECIDEALOT_VON_ENABLED` | `true` | Download and expose Von selectors. |
 | `DECIDEALOT_CLM_ENABLED` | `auto` | Enable CLM when its embeddings URL is set. Use `true` to require it or `false` to skip it. |
@@ -41,6 +44,9 @@ Pass configuration with Docker `--env-file` or your container manager. The image
 | `DECIDEALOT_CLM_EMBEDDINGS_MODEL` | `qwen3-8b` | Model selector sent to the CLM embeddings endpoint. It must return Qwen3-8B last-token vectors with width `4096`. |
 | `DECIDEALOT_CLM_EMBEDDINGS_API_KEY` | empty | Optional Bearer token passed only to the configured CLM embeddings endpoint. |
 | `DECIDEALOT_CLM_EMBEDDINGS_TIMEOUT_SECONDS` | `120` | CLM embeddings request timeout in seconds. |
+| `DECIDEALOT_CLM_PARALLEL_WITH_LOCAL_MODELS` | `false` | Allow CLM and its Qwen encoder to overlap local model inference. Leave false when sharing a host or GPU. |
+| `DECIDEALOT_TYPESAFE_API_KEY` | empty | Upstream Bearer key for TypeSafe Jev. Keep it separate from the caller-facing `DECIDEALOT_API_KEY`. |
+| `DECIDEALOT_JEV_ENABLED` | `auto` | Enable Jev when the upstream key is present. `true` requires a key; `false` disables it. |
 | `DECIDEALOT_MAX_REQUEST_BYTES` | `1048576` | Maximum JSON request size. |
 | `DECIDEALOT_LOG_LEVEL` | `INFO` | Structured log threshold. |
 | `DECIDEALOT_MCP_ALLOWED_HOSTS` | loopback and `decidealot` | Comma-separated MCP `Host` values accepted while DNS rebinding protection stays enabled. |
@@ -49,6 +55,8 @@ Pass configuration with Docker `--env-file` or your container manager. The image
 The mounted host directory must be writable by the runtime UID and GID. The Docker commands above pass your current IDs with `--user "$runtime_uid:$runtime_gid"`. Decidealot creates `laya`, `von`, and, when enabled, `clm` subdirectories under `/models`. The image falls back to non-root `1000:1000` only if a caller does not pass a runtime user. Mount only the directory reserved for model bundles.
 
 CLM is a local `Contrastive-LM/CLM-v0.1-8B` projection head over one external embeddings service. It sends rendered decision state and criteria to that service. Configure a URL you control or trust. The configured model must emit Qwen3-8B last-token embeddings with exactly 4096 float values. Decidealot rejects any other vector width before the projection head runs.
+
+Jev is hosted by TypeSafe. Decidealot reads the authenticated model catalog from `https://api.typesafe.ai/v1/models` and refreshes it every 60 seconds. Every Jev decision sends its complete state, instructions, and criteria to `https://api.typesafe.ai/v1/systemone`, using one exact name from that catalog. The upstream key stays in the server process and is never a field in a decision request. To run Jev alone, set `DECIDEALOT_LAYA_ENABLED=false`, `DECIDEALOT_VON_ENABLED=false`, leave CLM unconfigured, and provide `DECIDEALOT_TYPESAFE_API_KEY` through a private environment file or secret store. That configuration needs no writable `/models` mount and downloads no model bundles. A TypeSafe authentication or service failure becomes a safe `503` to the caller; inspect the upstream account separately rather than exposing its response.
 
 ## CUDA deployment
 
@@ -120,7 +128,7 @@ Pass both values to `docker run` with `--env DECIDEALOT_MCP_ALLOWED_HOSTS --env 
 
 ## Lifecycle and upgrades
 
-The service keeps at most one provider resident. A request for another model waits for the active request, releases the old model and Torch runtime, then starts the selected provider. `POST /v1/models/unload` is the only public unload endpoint. It is idempotent and returns `409` without unloading anything while a provider has an active decision request.
+The service keeps at most one local provider resident by default. A request for another local model waits for an idle slot, releases the least recently used idle model and Torch runtime, then starts the selected provider. A batch may name more local providers than resident slots; each waits its turn. Set `DECIDEALOT_MAX_RESIDENT_LOCAL_PROVIDERS=2` or `3` to keep more families loaded when memory permits. On CUDA, local inference is still serialized. CLM shares that local serial lane by default, even on CPU, because its Qwen embeddings endpoint may use the same host. Set `DECIDEALOT_CLM_PARALLEL_WITH_LOCAL_MODELS=true` only when that overlap is safe. Hosted Jev does not alter the local provider lifecycle and can overlap local calls. `POST /v1/models/unload` is the only public unload endpoint. It affects local providers only, is idempotent, and returns `409` without unloading anything while a local provider has an active decision request.
 
 Use a versioned image tag for upgrades. Pull it, recreate the container with the same model directory and configuration file, then check `/health`. Keep the model directory to reuse downloaded bundles.
 

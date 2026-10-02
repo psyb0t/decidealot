@@ -2,6 +2,16 @@
 
 All notable changes per release. Versions follow [SemVer](https://semver.org/). Before 1.0, compatible additions use a minor version and fixes use a patch version. Breaking API or configuration changes are called out.
 
+## v0.6.0
+
+Added:
+
+- Added hosted TypeSafe Jev alongside the local Laya, Von, and CLM providers. Configure a TypeSafe API key to enable Jev without downloading a local model. Requests to Jev send their decision state and questions to TypeSafe.
+- Hosted model names and metadata come from TypeSafe's authenticated model catalog, refreshed every 60 seconds. Select a name returned by `GET /v1/models`; Decidealot adds no local `jev` alias.
+- Added `POST /v1/systemone/batch` and MCP `system_one_batch` for independent requests with separate models, states, and questions. Results return in input order, each with the model that answered. A failed item fails the batch without partial results.
+- Added optional batch item and provider-call concurrency limits. Requests to the same model run in order. Hosted Jev can overlap local work; local model overlap follows device and CLM encoder settings.
+- Added a configurable resident local-provider limit. Hosts with enough memory can keep multiple local models loaded; the default remains one. Idle unloading and explicit unload release every resident local provider.
+
 ## v0.5.0
 
 Added:

@@ -1,4 +1,4 @@
-"""Version 2 MCP tools for local TypeSafe-compatible decisions."""
+"""Version 2 MCP tools for TypeSafe-compatible decisions."""
 
 import json
 from collections.abc import Awaitable
@@ -16,10 +16,13 @@ from decidealot.security import request_id_from_header
 from decidealot.typesafe import JSONValue, validation_error_content
 
 _system_one_tool_name = "system_one"
+_system_one_batch_tool_name = "system_one_batch"
 _list_models_tool_name = "list_models"
 _unload_models_tool_name = "unload_models"
-_server_description = "Run local typed System One decisions through Decidealot."
-_server_instructions = "Use system_one for a model, state, and named typed questions."
+_server_description = "Run typed System One decisions through Decidealot."
+_server_instructions = (
+    "Use system_one for one decision or system_one_batch for independent decisions."
+)
 
 
 def create_mcp_server(decisions: DecisionService) -> MCPServer[object]:
@@ -35,7 +38,7 @@ def create_mcp_server(decisions: DecisionService) -> MCPServer[object]:
 
     @server.tool(
         name=_system_one_tool_name,
-        description="Run one local TypeSafe-compatible typed decision.",
+        description="Run one TypeSafe-compatible typed decision.",
         structured_output=True,
     )
     async def system_one(
@@ -44,7 +47,7 @@ def create_mcp_server(decisions: DecisionService) -> MCPServer[object]:
         questions: dict[str, Any],
         context: Context[object, object],
     ) -> dict[str, Any]:
-        """Run the selected local model against one state and named typed questions."""
+        """Run the selected model against one state and named typed questions."""
 
         return await _run_tool(
             decisions.system_one(
@@ -54,14 +57,29 @@ def create_mcp_server(decisions: DecisionService) -> MCPServer[object]:
         )
 
     @server.tool(
+        name=_system_one_batch_tool_name,
+        description="Run independent typed decisions with resource-aware model scheduling.",
+        structured_output=True,
+    )
+    async def system_one_batch(
+        requests: list[dict[str, Any]],
+        context: Context[object, object],
+    ) -> dict[str, Any]:
+        """Return one ordered result for each complete System One request."""
+
+        return await _run_tool(
+            decisions.system_one_batch({"requests": requests}, _request_id(context))
+        )
+
+    @server.tool(
         name=_list_models_tool_name,
-        description="List the local model aliases accepted by system_one.",
+        description="List the model aliases accepted by system_one.",
         structured_output=True,
     )
     async def list_models() -> dict[str, Any]:
         """List the same model catalog exposed by GET /v1/models."""
 
-        return decisions.model_catalog()
+        return await _run_tool(decisions.model_catalog())
 
     @server.tool(
         name=_unload_models_tool_name,

@@ -6,7 +6,12 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from decidealot.app import create_embedded_app
-from decidealot.constants import CLM_PROVIDER_NAME, LAYA_PROVIDER_NAME, VON_PROVIDER_NAME
+from decidealot.constants import (
+    CLM_PROVIDER_NAME,
+    JEV_PROVIDER_NAME,
+    LAYA_PROVIDER_NAME,
+    VON_PROVIDER_NAME,
+)
 from decidealot.settings import Settings
 from tests.conftest import (
     FakeProvider,
@@ -28,7 +33,7 @@ _mcp_headers = {
     "Content-Type": "application/json",
 }
 _client_info = {"name": "decidealot-contract-test", "version": "1"}
-_expected_tool_names = {"system_one", "list_models", "unload_models"}
+_expected_tool_names = {"system_one", "system_one_batch", "list_models", "unload_models"}
 _operator_api_key = SecretStr("operator-secret")
 _operator_authorization = {"Authorization": "Bearer operator-secret"}
 _request_id = "1d3fb045-4d61-4ecc-b169-cf012a10ea57"
@@ -105,6 +110,21 @@ def test_mcp_streamable_http_lists_tools_and_runs_a_system_one_decision() -> Non
             ),
         )
 
+        batch_response = client.post(
+            _mcp_path,
+            headers=session_headers,
+            json=_mcp_message(
+                _tools_call_method,
+                {
+                    "name": "system_one_batch",
+                    "arguments": {
+                        "requests": [system_one_request("laya"), system_one_request("laya")]
+                    },
+                },
+                request_id=6,
+            ),
+        )
+
         unload_response = client.post(
             _mcp_path,
             headers=session_headers,
@@ -120,6 +140,12 @@ def test_mcp_streamable_http_lists_tools_and_runs_a_system_one_decision() -> Non
     assert result["isError"] is False
     assert result["structuredContent"]["model"] == "laya"
     assert result["structuredContent"]["answers"]["route"]["choice"] == "allow"
+    assert batch_response.status_code == 200
+    batch_result = cast(dict[str, Any], batch_response.json())["result"]
+    assert batch_result["isError"] is False
+    assert [item["model"] for item in batch_result["structuredContent"]["results"]] == [
+        "laya", "laya"
+    ]
     assert unload_response.status_code == 200
     assert cast(dict[str, Any], unload_response.json())["result"]["structuredContent"] == {
         "status": "unloaded",
@@ -128,7 +154,7 @@ def test_mcp_streamable_http_lists_tools_and_runs_a_system_one_decision() -> Non
             {"name": "von", "wasLoaded": False},
         ],
     }
-    assert len(providers[LAYA_PROVIDER_NAME].calls) == 1
+    assert len(providers[LAYA_PROVIDER_NAME].calls) == 3
     assert providers[LAYA_PROVIDER_NAME].calls[0][1] == _request_id
 
 
@@ -362,6 +388,48 @@ def test_mcp_lists_and_uses_clm_when_it_is_the_only_enabled_provider() -> None:
     decision_result = cast(dict[str, Any], decision_response.json())["result"]
     assert decision_result["structuredContent"]["model"] == "clm-0.1-8b"
     assert len(providers[CLM_PROVIDER_NAME].calls) == 1
+
+
+def test_mcp_lists_and_uses_hosted_jev_without_local_model_acquisition() -> None:
+    settings = Settings(
+        laya_enabled=False,
+        von_enabled=False,
+        typesafe_api_key=SecretStr("upstream-secret"),
+    )
+    provider = FakeProvider(native_system_one_response("jev-latest"))
+    supervisor = LifecycleSupervisor(provider_names=())
+    app = create_embedded_app(settings, {JEV_PROVIDER_NAME: provider}, supervisor)
+
+    with TestClient(app, base_url="http://127.0.0.1:8080", follow_redirects=False) as client:
+        session_headers = _initialize_session(client)
+        models_response = client.post(
+            _mcp_path,
+            headers=session_headers,
+            json=_mcp_message(
+                _tools_call_method,
+                {"name": "list_models", "arguments": {}},
+                request_id=2,
+            ),
+        )
+        decision_response = client.post(
+            _mcp_path,
+            headers=session_headers,
+            json=_mcp_message(
+                _tools_call_method,
+                {"name": "system_one", "arguments": system_one_request("jev-latest")},
+                request_id=3,
+            ),
+        )
+
+    models_result = cast(dict[str, Any], models_response.json())["result"]
+    assert [model["name"] for model in models_result["structuredContent"]["models"]] == [
+        "jev-latest",
+        "jev-preview",
+    ]
+    decision_result = cast(dict[str, Any], decision_response.json())["result"]
+    assert decision_result["structuredContent"]["model"] == "jev-latest"
+    assert provider.calls[0][0]["model"] == "jev-latest"
+    assert supervisor.acquired_providers == []
 
 
 def test_mcp_rejects_an_oversized_request_before_provider_forwarding() -> None:
