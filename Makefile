@@ -21,7 +21,8 @@ DEV_RUN := docker run --rm --init --user $(UID):$(GID) -e HOME=/tmp \
 	-v $(CURDIR):/work -w /work $(DEV_IMAGE)
 DEV_TOOL_RUN := docker run --rm --init --user $(UID):$(GID) -e HOME=/tmp \
 	-v $(CURDIR):/work -w /work $(DEV_IMAGE):tools
-DEV_RUN_DIND := docker run --rm --init --user $(UID):$(GID) \
+# Sibling fixtures publish on the host daemon's loopback interface.
+DEV_RUN_DIND := docker run --rm --init --network host --user $(UID):$(GID) \
 	--group-add $(DOCKER_GID) -e HOME=/tmp -e PYTHONPATH=$(CURDIR)/src -e VIRTUAL_ENV=/opt/venv -e PATH=/opt/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 	-v $(CURDIR):$(CURDIR) -w $(CURDIR) \
 	-v $(DOCKER_SOCK):$(DOCKER_SOCK) $(DEV_IMAGE)
@@ -92,8 +93,8 @@ test-real: build ## Run real HTTP requests against downloaded CPU Laya and Von w
 test-real-cuda: build-cuda ## Run real HTTP requests against downloaded CUDA Laya and Von weights
 	bash tests/integration/e2e_local_models.sh --cuda
 
-test-real-clm: build ## Run the real CLM head against a strict mock embeddings endpoint
-	bash tests/integration/e2e_clm.sh
+test-real-clm: build dev-image ## Run the real CLM head against a strict mock embeddings endpoint
+	$(DEV_RUN_DIND) bash tests/integration/e2e_clm.sh
 
 test-real-jev: dev-image ## Run one live hosted Jev decision with a private TypeSafe key
 	@test -n "$$DECIDEALOT_TYPESAFE_API_KEY" || { echo "DECIDEALOT_TYPESAFE_API_KEY is required" >&2; exit 2; }

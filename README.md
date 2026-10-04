@@ -19,6 +19,7 @@ At startup Decidealot downloads and verifies every enabled local bundle. It then
 - [Expose MCP through a proxy](#expose-mcp-through-a-proxy)
 - [Pick a model](#pick-a-model)
 - [Configuration](#configuration)
+- [CLM embeddings and caching](#clm-embeddings-and-caching)
 - [CUDA](#cuda)
 - [Model storage and unloading](#model-storage-and-unloading)
 - [Agent integrations](#agent-integrations)
@@ -105,6 +106,26 @@ Send the state to judge and a bounded question. Decidealot returns typed results
 
 `choice` questions need named `criteria`. `score` questions need an ordered criteria array whose position is the score. `noul` questions return a probability between zero and one. [The API guide](docs/api.md) has the request rules, response shape, validation failures, aliases, authentication, and lifecycle behavior.
 
+Put the subject in `state`, the question and decision rules in each question's `instructions`, and explicit descriptions in `criteria`. A label like `review` does not explain what should be reviewed. For `noul`, write the statement whose probability you want in `instructions`.
+
+CLM accepts optional flat request configuration. The selected `model` already identifies which settings apply:
+
+```json
+{
+  "model": "clm",
+  "config": {"temperature": 0.8},
+  "state": "The operation permanently removes protected data.",
+  "questions": {
+    "review": {
+      "type": "noul",
+      "instructions": "This operation requires human review because it removes protected data."
+    }
+  }
+}
+```
+
+CLM temperature defaults to `1` and accepts finite numbers greater than `0` and at most `100`. Lower values sharpen its probability distribution; they do not make the answer more correct. Laya, Von, and hosted Jev currently accept only omitted or empty `config`. Unsupported keys and values return `422`, never silently disappear. The same config belongs in MCP tool arguments or each individual batch request. [Request configuration](docs/api.md#request-configuration) covers the contract.
+
 ## Use MCP
 
 The same container serves MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. The `system_one` tool takes the same `model`, `state`, and `questions` fields as `POST /v1/systemone`. `system_one_batch` takes a `requests` list, each item with those same fields. `list_models` returns the live catalog. `unload_models` releases local model memory. Direct loopback clients and containers using the `decidealot` Docker service name work by default.
@@ -183,6 +204,9 @@ Pass configuration with `--env-file` or your container manager. The image uses f
 | `DECIDEALOT_CLM_EMBEDDINGS_MODEL` | `qwen3-8b` | Model selector sent to the embeddings endpoint. It must produce Qwen3-8B last-token vectors with width `4096`. |
 | `DECIDEALOT_CLM_EMBEDDINGS_API_KEY` | empty | Optional Bearer token sent only to the configured CLM embeddings endpoint. |
 | `DECIDEALOT_CLM_EMBEDDINGS_TIMEOUT_SECONDS` | `120` | One CLM embeddings request timeout in seconds. |
+| `DECIDEALOT_CLM_CANDIDATE_CACHE_ENTRIES` | `1024` | Candidate embedding LRU capacity, `0` to `4096`. `0` disables caching. |
+| `DECIDEALOT_CLM_CANDIDATE_CACHE_TTL_SECONDS` | `600` | Candidate vector lifetime, greater than `0` and at most `86400` seconds. |
+| `DECIDEALOT_CLM_MAX_TEXT_BYTES` | `8192` | UTF-8 byte limit per rendered state plus instructions or candidate, `1` to `1048576`. Over-limit CLM inputs return `422`. |
 | `DECIDEALOT_CLM_PARALLEL_WITH_LOCAL_MODELS` | `false` | Permit CLM and its Qwen encoder to overlap other local models. Keep false when they share this host's resources. |
 | `DECIDEALOT_TYPESAFE_API_KEY` | empty | Private upstream Bearer key for TypeSafe's hosted Jev API. Separate from the caller-facing `DECIDEALOT_API_KEY`. |
 | `DECIDEALOT_JEV_ENABLED` | `auto` | Enable Jev when the upstream key is set. `true` requires a key; `false` hides Jev even with a key. |
@@ -190,6 +214,10 @@ Pass configuration with `--env-file` or your container manager. The image uses f
 | `DECIDEALOT_MCP_ALLOWED_ORIGINS` | loopback HTTP origins | Comma-separated browser origins accepted by MCP. Add each public browser origin here. |
 
 The container always stores local bundles under `/models`. Its only model storage setting is the host directory mounted there. To run only CLM, set `DECIDEALOT_LAYA_ENABLED=false`, `DECIDEALOT_VON_ENABLED=false`, and configure `DECIDEALOT_CLM_EMBEDDINGS_URL`. To run only Jev, disable Laya and Von, leave CLM unconfigured, and supply `DECIDEALOT_TYPESAFE_API_KEY`; no `/models` mount is needed. CLM's embeddings endpoint and TypeSafe's Jev API receive decision state and criteria, so use them only when that data may leave your host. Keep the loopback bind for one-host use. Before putting Decidealot behind a proxy, tunnel, or public address, set `DECIDEALOT_API_KEY` to a real secret, require `Authorization: Bearer <your-key>` from every caller, and configure the precise MCP host and origin allowlists above.
+
+## CLM embeddings and caching
+
+CLM normalizes encoder vectors before applying its projection heads. Repeated candidate texts reuse a bounded process-local cache; raw decision state is never cached. Unloading CLM clears that cache. `usage.input_tokens` reports only tokens charged by the embeddings calls actually made. The byte limit is not a token limit: configure your encoder to reject inputs beyond its context instead of silently truncating. A quantized Qwen encoder is not equivalent to upstream's full-precision encoder, and matching vector width alone does not establish equivalent accuracy.
 
 ## CUDA
 

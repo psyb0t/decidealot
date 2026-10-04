@@ -24,6 +24,7 @@ from decidealot.providers import (
     ModelRouter,
     ProviderClient,
     native_provider_payload,
+    validate_provider_config,
 )
 from decidealot.supervisor import ProviderUnloadResult
 from decidealot.typesafe import (
@@ -147,6 +148,7 @@ class DecisionService:
 
         request = parse_system_one_request(body)
         route = await self._resolve_route(request.model)
+        validate_provider_config(route, request)
         return await self._run_request(request, route, request_id)
 
     async def system_one_batch(self, body: object, request_id: str) -> dict[str, Any]:
@@ -156,10 +158,12 @@ class DecisionService:
         routes: list[ModelRoute] = []
         for index, request in enumerate(batch.requests):
             try:
-                routes.append(await self._resolve_route(request.model))
+                route = await self._resolve_route(request.model)
+                validate_provider_config(route, request)
+                routes.append(route)
             except TypeSafeValidationError as error:
                 detail = [
-                    {**entry, "loc": ["body", "requests", index, "model"]}
+                    {**entry, "loc": ["body", "requests", index, *entry["loc"][1:]]}
                     for entry in error.detail
                 ]
                 raise TypeSafeValidationError(detail) from error
@@ -218,8 +222,10 @@ class DecisionService:
                 self._clm_active = True
             else:
                 await self._local_condition.wait_for(
-                    lambda: not self._clm_active
-                    and (self._device != "cuda" or self._active_local_models == 0)
+                    lambda: (
+                        not self._clm_active
+                        and (self._device != "cuda" or self._active_local_models == 0)
+                    )
                 )
                 self._active_local_models += 1
         try:

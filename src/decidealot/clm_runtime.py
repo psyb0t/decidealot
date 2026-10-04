@@ -1,12 +1,16 @@
 """CLM projection-head inference over a fixed configured OpenAI embeddings endpoint."""
 
 import base64
+import hashlib
 import json
 import logging
 import math
 import os
 import struct
 import threading
+import time
+from array import array
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib import import_module
@@ -19,6 +23,14 @@ _embedding_dimensions = 4096
 _default_host = "127.0.0.1"
 _default_port = 8013
 _default_timeout_seconds = 120.0
+_default_cache_entries = 1024
+_default_cache_ttl_seconds = 600.0
+_default_max_text_bytes = 8192
+_maximum_cache_entries = 4096
+_maximum_cache_ttl_seconds = 86400.0
+_maximum_text_bytes = 1048576
+_normalization_epsilon = 1e-12
+_minimum_softmax_logit = -745.0
 _maximum_logit_scale = 100.0
 _default_projection_dimensions = 512
 _checkpoint_config_key = "cfg"
@@ -227,9 +239,13 @@ def question_candidates(question: Mapping[str, object]) -> tuple[list[str], list
         description = descriptions.get(key)
         if description is None or description == "":
             description = (
-                f"Yes. This is true: {instructions}"
-                if key == "true"
-                else (f"No. This is false: {instructions}")
+                key
+                if not instructions
+                else (
+                    f"Yes. This is true: {instructions}"
+                    if key == "true"
+                    else (f"No. This is false: {instructions}")
+                )
             )
         noul_candidates.append(f"{key}: {to_text(description)}")
     return list(_noul_keys), noul_candidates
@@ -306,7 +322,19 @@ class CLMEngine:
         embeddings_api_key: str | None,
         timeout_seconds: float,
         device: str,
+        cache_entries: int = _default_cache_entries,
+        cache_ttl_seconds: float = _default_cache_ttl_seconds,
+        max_text_bytes: int = _default_max_text_bytes,
     ) -> None:
+        if isinstance(cache_entries, bool) or not 0 <= cache_entries <= _maximum_cache_entries:
+            raise CLMRuntimeError("CLM cache entries must be between zero and 4096")
+        if (
+            not math.isfinite(cache_ttl_seconds)
+            or not 0 < cache_ttl_seconds <= _maximum_cache_ttl_seconds
+        ):
+            raise CLMRuntimeError("CLM cache TTL must be between zero and 86400 seconds")
+        if isinstance(max_text_bytes, bool) or not 1 <= max_text_bytes <= _maximum_text_bytes:
+            raise CLMRuntimeError("CLM text byte limit must be between one and 1048576")
         self._checkpoint_path = checkpoint_path
         self._embeddings_url = embeddings_url
         self._embeddings_model = embeddings_model
@@ -317,6 +345,11 @@ class CLMEngine:
         self._state_head: Any | None = None
         self._action_head: Any | None = None
         self._scale = 1.0
+        self._cache_entries = cache_entries
+        self._cache_ttl_seconds = cache_ttl_seconds
+        self._max_text_bytes = max_text_bytes
+        self._cache_lock = threading.Lock()
+        self._candidate_cache: OrderedDict[str, tuple[float, array[float]]] = OrderedDict()
 
     def answer(self, payload: Mapping[str, object]) -> dict[str, Any]:
         """Call the configured encoder once, then apply the local projection heads."""
@@ -329,6 +362,16 @@ class CLMEngine:
         if not isinstance(questions, Mapping) or not questions:
             raise CLMInputError("questions must be a non-empty object")
         question_mapping = cast(Mapping[str, object], questions)
+        temperature = payload.get("temperature", 1.0)
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, int | float)
+            or not math.isfinite(temperature)
+            or not 0 < temperature <= _maximum_logit_scale
+        ):
+            raise CLMInputError(
+                "temperature must be a finite number greater than zero and at most 100"
+            )
 
         question_entries: list[tuple[str, Mapping[str, object], list[str], list[str]]] = []
         state_texts: list[str] = []
@@ -342,14 +385,58 @@ class CLMEngine:
             state_texts.append(state_text(state, question.get("instructions")))
             candidate_texts.extend(candidates)
 
-        embeddings = self._request_embeddings([*state_texts, *candidate_texts])
+        embeddings = self._cached_embeddings(state_texts, candidate_texts)
         self._ensure_heads()
-        answers = self._answer_embeddings(question_entries, embeddings.vectors)
+        answers = self._answer_embeddings(question_entries, embeddings.vectors, float(temperature))
         return {
             "model": model,
             "answers": answers,
             "usage": {"input_tokens": embeddings.input_tokens, "output_tokens": 0},
         }
+
+    def _cached_embeddings(self, states: list[str], candidates: list[str]) -> EmbeddingBatch:
+        for text in [*states, *candidates]:
+            if len(text.encode("utf-8")) > self._max_text_bytes:
+                raise CLMInputError("rendered CLM text exceeds the configured UTF-8 byte limit")
+        keys = [hashlib.sha256(text.encode("utf-8")).hexdigest() for text in candidates]
+        with self._cache_lock:
+            now = time.monotonic()
+            expired = [key for key, (expiry, _) in self._candidate_cache.items() if expiry <= now]
+            for key in expired:
+                del self._candidate_cache[key]
+            missing = {
+                key: text
+                for key, text in zip(keys, candidates, strict=True)
+                if key not in self._candidate_cache
+            }
+            encoded = self._request_embeddings([*states, *missing.values()])
+            if len(encoded.vectors) != len(states) + len(missing):
+                raise CLMEmbeddingError("embeddings response has an unexpected vector count")
+            normalized = [_normalize_embedding(vector) for vector in encoded.vectors]
+            resolved = {
+                key: vector for key, (_, vector) in self._candidate_cache.items() if key in keys
+            }
+            for key in resolved:
+                self._candidate_cache.move_to_end(key)
+            expiry = time.monotonic() + self._cache_ttl_seconds
+            for key, vector in zip(missing, normalized[len(states) :], strict=True):
+                resolved[key] = array("f", vector)
+                if self._cache_entries:
+                    self._candidate_cache[key] = (expiry, resolved[key])
+                    while len(self._candidate_cache) > self._cache_entries:
+                        self._candidate_cache.popitem(last=False)
+            logger.debug(
+                "CLM candidate embeddings resolved",
+                extra={
+                    "cache_hits": len(keys) - len(missing),
+                    "cache_misses": len(missing),
+                    "cache_entries": len(self._candidate_cache),
+                },
+            )
+            return EmbeddingBatch(
+                vectors=[*normalized[: len(states)], *(list(resolved[key]) for key in keys)],
+                input_tokens=encoded.input_tokens,
+            )
 
     def _request_embeddings(self, texts: list[str]) -> EmbeddingBatch:
         try:
@@ -460,6 +547,7 @@ class CLMEngine:
         self,
         question_entries: Sequence[tuple[str, Mapping[str, object], list[str], list[str]]],
         vectors: list[list[float]],
+        temperature: float = 1.0,
     ) -> dict[str, Any]:
         try:
             torch = cast(Any, import_module("torch"))
@@ -498,11 +586,28 @@ class CLMEngine:
                             projected_states[state_index],
                         )
                     ).tolist()
-                    answers[name] = answer_from_logits(question, keys, logits)
+                    answers[name] = answer_from_logits(
+                        question, keys, _temperature_logits(logits, temperature)
+                    )
                     candidate_start = candidate_end
         except RuntimeError as error:
             raise CLMRuntimeError("run CLM projection heads") from error
         return answers
+
+
+def _temperature_logits(logits: list[float], temperature: float) -> list[float]:
+    # Subtract first so valid tiny temperatures cannot overflow all logits to infinity.
+    maximum = max(logits)
+    return [max((float(value) - maximum) / temperature, _minimum_softmax_logit) for value in logits]
+
+
+def _normalize_embedding(vector: list[float]) -> list[float]:
+    if len(vector) != _embedding_dimensions or not all(math.isfinite(value) for value in vector):
+        raise CLMEmbeddingError("embeddings response contains an invalid vector")
+    norm = math.sqrt(sum(value * value for value in vector)) + _normalization_epsilon
+    if not math.isfinite(norm):
+        raise CLMEmbeddingError("embeddings response vector magnitude is invalid")
+    return [value / norm for value in vector]
 
 
 def request_embeddings(
@@ -642,6 +747,15 @@ def run_clm(checkpoint_path: Path) -> None:
         embeddings_api_key=os.environ.get("CLM_EMBEDDINGS_API_KEY") or None,
         timeout_seconds=timeout_seconds,
         device=os.environ.get("CLM_DEVICE", "cpu"),
+        cache_entries=_environment_bounded_integer(
+            "CLM_CANDIDATE_CACHE_ENTRIES", _default_cache_entries, 0, _maximum_cache_entries
+        ),
+        cache_ttl_seconds=_environment_float(
+            "CLM_CANDIDATE_CACHE_TTL_SECONDS", _default_cache_ttl_seconds
+        ),
+        max_text_bytes=_environment_bounded_integer(
+            "CLM_MAX_TEXT_BYTES", _default_max_text_bytes, 1, _maximum_text_bytes
+        ),
     )
     uvicorn.run(
         create_application(engine),
@@ -671,6 +785,10 @@ def _environment_float(name: str, default: float) -> float:
 
 
 def _environment_integer(name: str, default: int) -> int:
+    return _environment_bounded_integer(name, default, 1, 65535)
+
+
+def _environment_bounded_integer(name: str, default: int, minimum: int, maximum: int) -> int:
     value = os.environ.get(name)
     if value is None:
         return default
@@ -678,6 +796,6 @@ def _environment_integer(name: str, default: int) -> int:
         parsed = int(value)
     except ValueError as error:
         raise CLMRuntimeError(f"{name} must be an integer") from error
-    if parsed < 1 or parsed > 65535:
-        raise CLMRuntimeError(f"{name} must be a valid TCP port")
+    if not minimum <= parsed <= maximum:
+        raise CLMRuntimeError(f"{name} must be between {minimum} and {maximum}")
     return parsed

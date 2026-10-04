@@ -44,6 +44,9 @@ Pass configuration with Docker `--env-file` or your container manager. The image
 | `DECIDEALOT_CLM_EMBEDDINGS_MODEL` | `qwen3-8b` | Model selector sent to the CLM embeddings endpoint. It must return Qwen3-8B last-token vectors with width `4096`. |
 | `DECIDEALOT_CLM_EMBEDDINGS_API_KEY` | empty | Optional Bearer token passed only to the configured CLM embeddings endpoint. |
 | `DECIDEALOT_CLM_EMBEDDINGS_TIMEOUT_SECONDS` | `120` | CLM embeddings request timeout in seconds. |
+| `DECIDEALOT_CLM_CANDIDATE_CACHE_ENTRIES` | `1024` | Process-local candidate vector LRU capacity, `0` to `4096`. `0` disables caching. |
+| `DECIDEALOT_CLM_CANDIDATE_CACHE_TTL_SECONDS` | `600` | Candidate vector lifetime, greater than `0` and at most `86400` seconds. |
+| `DECIDEALOT_CLM_MAX_TEXT_BYTES` | `8192` | UTF-8 byte limit per rendered state plus instructions or candidate, `1` to `1048576`. |
 | `DECIDEALOT_CLM_PARALLEL_WITH_LOCAL_MODELS` | `false` | Allow CLM and its Qwen encoder to overlap local model inference. Leave false when sharing a host or GPU. |
 | `DECIDEALOT_TYPESAFE_API_KEY` | empty | Upstream Bearer key for TypeSafe Jev. Keep it separate from the caller-facing `DECIDEALOT_API_KEY`. |
 | `DECIDEALOT_JEV_ENABLED` | `auto` | Enable Jev when the upstream key is present. `true` requires a key; `false` disables it. |
@@ -57,6 +60,12 @@ The mounted host directory must be writable by the runtime UID and GID. The Dock
 CLM is a local `Contrastive-LM/CLM-v0.1-8B` projection head over one external embeddings service. It sends rendered decision state and criteria to that service. Configure a URL you control or trust. The configured model must emit Qwen3-8B last-token embeddings with exactly 4096 float values. Decidealot rejects any other vector width before the projection head runs.
 
 Jev is hosted by TypeSafe. Decidealot reads the authenticated model catalog from `https://api.typesafe.ai/v1/models` and refreshes it every 60 seconds. Every Jev decision sends its complete state, instructions, and criteria to `https://api.typesafe.ai/v1/systemone`, using one exact name from that catalog. The upstream key stays in the server process and is never a field in a decision request. To run Jev alone, set `DECIDEALOT_LAYA_ENABLED=false`, `DECIDEALOT_VON_ENABLED=false`, leave CLM unconfigured, and provide `DECIDEALOT_TYPESAFE_API_KEY` through a private environment file or secret store. That configuration needs no writable `/models` mount and downloads no model bundles. A TypeSafe authentication or service failure becomes a safe `503` to the caller; inspect the upstream account separately rather than exposing its response.
+
+## CLM embeddings and caching
+
+CLM normalizes encoder vectors before projection. It caches candidate vectors, not raw decision state, under hashed text keys. At the maximum `4096` entries the vectors occupy roughly 64 MiB plus indexing overhead. Cache expiry, LRU eviction, and provider unload discard them. Reusing a candidate saves its embedding call; every request still embeds its state. Restart or unload CLM when changing encoder weights behind the same URL so cached candidates cannot mix encoder revisions.
+
+The CLM input limit rejects overlong rendered texts before calling the encoder. It is measured in UTF-8 bytes, not tokens, and cannot detect truncation performed by an external server. Configure the encoder to reject input beyond its context and test that behavior. The upstream reference uses Qwen3-8B last-token pooling with a 2048-token context. Quantization, tokenizer, pooling, and context changes can alter decisions even when the vector width is correct. Do not assume an arbitrary 4096-dimensional embeddings model is interchangeable.
 
 ## CUDA deployment
 

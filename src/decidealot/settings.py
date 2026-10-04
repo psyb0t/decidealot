@@ -8,8 +8,11 @@ from pydantic import BeforeValidator, Field, SecretStr, field_validator, model_v
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from decidealot.constants import (
+    DEFAULT_CLM_CANDIDATE_CACHE_ENTRIES,
+    DEFAULT_CLM_CANDIDATE_CACHE_TTL_SECONDS,
     DEFAULT_CLM_EMBEDDINGS_MODEL,
     DEFAULT_CLM_EMBEDDINGS_TIMEOUT_SECONDS,
+    DEFAULT_CLM_MAX_TEXT_BYTES,
     DEFAULT_DEVICE,
     DEFAULT_IMAGE_VARIANT,
     DEFAULT_LISTEN_HOST,
@@ -120,6 +123,13 @@ class Settings(BaseSettings):
         le=600,
     )
     clm_parallel_with_local_models: bool = False
+    clm_candidate_cache_entries: int = Field(
+        default=DEFAULT_CLM_CANDIDATE_CACHE_ENTRIES, ge=0, le=4096
+    )
+    clm_candidate_cache_ttl_seconds: float = Field(
+        default=DEFAULT_CLM_CANDIDATE_CACHE_TTL_SECONDS, gt=0, le=86400, allow_inf_nan=False
+    )
+    clm_max_text_bytes: int = Field(default=DEFAULT_CLM_MAX_TEXT_BYTES, ge=1, le=1048576)
     typesafe_api_key: SecretStr | None = None
     jev_enabled: bool | None = None
     max_request_bytes: int = Field(default=DEFAULT_MAX_REQUEST_BYTES, ge=1024, le=16_777_216)

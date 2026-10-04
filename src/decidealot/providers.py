@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
-from pydantic import SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
 from decidealot.constants import (
     CLM_PROVIDER_NAME,
@@ -21,7 +21,7 @@ from decidealot.constants import (
     VON_PROVIDER_NAME,
     VON_SYSTEMONE_URL,
 )
-from decidealot.errors import ProviderUnavailableError, UnknownModelError
+from decidealot.errors import ProviderUnavailableError, TypeSafeValidationError, UnknownModelError
 from decidealot.settings import Settings
 from decidealot.typesafe import (
     ChoiceQuestion,
@@ -32,6 +32,7 @@ from decidealot.typesafe import (
     OptionalJSONValue,
     Question,
     SystemOneRequest,
+    validation_detail,
 )
 
 logger = logging.getLogger(__name__)
@@ -311,6 +312,37 @@ class ModelRouter:
         )
 
 
+class CLMRequestConfig(BaseModel):
+    """Optional probability scaling without changing the highest-scoring choice."""
+
+    model_config = ConfigDict(extra="forbid")
+    temperature: float = Field(default=1.0, strict=True, gt=0, le=100, allow_inf_nan=False)
+
+
+def validate_provider_config(route: ModelRoute, request: SystemOneRequest) -> None:
+    """Reject unsupported options before acquiring a provider or executing a batch."""
+
+    if route.provider_name == CLM_PROVIDER_NAME:
+        try:
+            CLMRequestConfig.model_validate(request.config)
+        except ValidationError as error:
+            raise TypeSafeValidationError(
+                validation_detail(error.errors(), ("body", "config"))
+            ) from error
+        return
+    if request.config:
+        raise TypeSafeValidationError(
+            [
+                {
+                    "loc": ["body", "config", name],
+                    "type": "extra_forbidden",
+                    "msg": "The selected provider does not support this setting",
+                }
+                for name in request.config
+            ]
+        )
+
+
 def native_provider_payload(route: ModelRoute, request: SystemOneRequest) -> dict[str, Any]:
     """Build the native body for local models or preserve the official Jev request.
 
@@ -325,14 +357,25 @@ def native_provider_payload(route: ModelRoute, request: SystemOneRequest) -> dic
         extra={"provider": route.provider_name, "model": route.upstream_model},
     )
     if not route.is_local:
-        return {**request.model_dump(mode="json"), "model": route.upstream_model}
-    return {
+        return {
+            **request.model_dump(mode="json", exclude={"config"}),
+            "model": route.upstream_model,
+        }
+    payload: dict[str, Any] = {
         "model": route.upstream_model,
         "state": request.state,
         "questions": {
-            name: _native_question(question) for name, question in request.questions.items()
+            name: (
+                question.model_dump(mode="json")
+                if route.provider_name == CLM_PROVIDER_NAME
+                else _native_question(question)
+            )
+            for name, question in request.questions.items()
         },
     }
+    if route.provider_name == CLM_PROVIDER_NAME and request.config:
+        payload["temperature"] = CLMRequestConfig.model_validate(request.config).temperature
+    return payload
 
 
 def _native_question(question: Question) -> dict[str, Any]:

@@ -71,6 +71,9 @@ def test_clm_spec_uses_the_laya_torch_runtime_and_fixed_embeddings_configuration
     )
     assert spec.environment["CLM_EMBEDDINGS_URL"] == "https://embeddings.example.test/v1/embeddings"
     assert spec.environment["CLM_EMBEDDINGS_MODEL"] == "qwen3-8b"
+    assert spec.environment["CLM_CANDIDATE_CACHE_ENTRIES"] == "1024"
+    assert spec.environment["CLM_CANDIDATE_CACHE_TTL_SECONDS"] == "600.0"
+    assert spec.environment["CLM_MAX_TEXT_BYTES"] == "8192"
 
 
 def test_jev_only_configuration_has_no_local_process_or_download_steps() -> None:

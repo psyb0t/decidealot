@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import builtins
 import json
+import math
 import struct
 import sys
 from collections.abc import Mapping
@@ -231,6 +232,10 @@ def test_clm_batches_all_state_vectors_before_candidate_vectors(
 
 
 def test_clm_renders_choice_score_and_nested_values_and_rejects_invalid_questions() -> None:
+    assert question_candidates({"type": "noul"}) == (
+        ["false", "true"],
+        ["false: false", "true: true"],
+    )
     assert to_text({"outer": ["first", {"inner": True}], "none": None}) == (
         "outer:\n  - first\n  -\n    inner: true\n\nnone: "
     )
@@ -459,9 +464,11 @@ def test_clm_loads_and_reuses_the_verified_projection_heads(
     assert state_head(["vector"]) == ["vector", "vector"]
 
 
+@pytest.mark.parametrize("temperature", [1.0, 0.5, 2.0, 1e-300])
 def test_clm_engine_projects_a_real_multi_question_batch_with_the_loaded_head_boundary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    temperature: float,
 ) -> None:
     modules = _fake_torch_modules(_fake_clm_checkpoint())
     monkeypatch.setattr(clm_runtime, "import_module", modules.__getitem__)
@@ -501,6 +508,7 @@ def test_clm_engine_projects_a_real_multi_question_batch_with_the_loaded_head_bo
     response = engine.answer(
         {
             "model": "clm-0.1-8b",
+            "temperature": temperature,
             "state": "Review this action.",
             "questions": {
                 "route": {
@@ -516,6 +524,9 @@ def test_clm_engine_projects_a_real_multi_question_batch_with_the_loaded_head_bo
     assert response["usage"] == {"input_tokens": 13, "output_tokens": 0}
     assert response["answers"]["route"]["choice"] == "allow"
     assert response["answers"]["safe"]["noul"] > 0.5
+    assert response["answers"]["route"]["probabilities"]["allow"] == pytest.approx(
+        1 / (1 + math.exp(-1 / temperature))
+    )
 
 
 def test_clm_loopback_application_exposes_health_and_maps_provider_failures() -> None:

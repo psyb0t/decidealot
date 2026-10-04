@@ -64,6 +64,7 @@ curl --fail --show-error "$DECIDEALOT_URL/v1/systemone" \
     "questions": {
       "handling": {
         "type": "choice",
+        "instructions": "Choose handling based on whether the operation is reversible and authorized.",
         "criteria": {
           "allow": "The operation is reversible and authorized.",
           "review": "A human must review the operation first."
@@ -74,6 +75,12 @@ curl --fail --show-error "$DECIDEALOT_URL/v1/systemone" \
 ```
 
 Use `GET /v1/models` to learn the configured Laya, Von, CLM, and Jev aliases. CLM selectors appear only when the deployment has a fixed embeddings URL that returns Qwen3-8B last-token vectors with width `4096`. Jev selectors appear only when its upstream key is configured and enabled. For several independent decisions, POST `{"requests":[{"model":"laya","state":"First case","questions":{"review":{"type":"noul"}}},{"model":"von","state":"Second case","questions":{"review":{"type":"noul"}}}]}` to `/v1/systemone/batch`. The response has ordered `results`; each item names the model that answered. Requests to one model run sequentially. Local CUDA models and CLM's Qwen calls also share a serial lane by default, while hosted Jev can overlap local work. A batch may wait and switch local models even with one resident slot. `DECIDEALOT_MAX_BATCH_CONCURRENCY` optionally caps simultaneous batch calls, while `DECIDEALOT_MAX_BATCH_REQUESTS` optionally caps item count. Set `DECIDEALOT_CLM_PARALLEL_WITH_LOCAL_MODELS=true` only when the embeddings service and CLM can safely overlap other local models. Use `POST /v1/models/unload` to release loaded local runtimes only when the user asks to free memory. The full request and response contract is in [API](https://github.com/psyb0t/decidealot/blob/main/docs/api.md).
+
+## CLM request settings and caching
+
+CLM accepts optional flat request config, for example `"config":{"temperature":0.8}` alongside `model`, `state`, and `questions`. Temperature must be finite, greater than zero, and at most 100; omitted means 1. Other providers accept only omitted or empty config. Each batch item carries its own settings. The response shape does not change. Invalid settings fail before any batch decision starts. Never put an encoder URL, API key, or deployment configuration in request config.
+
+CLM caches candidate embeddings only. `DECIDEALOT_CLM_CANDIDATE_CACHE_ENTRIES` defaults to 1024 (0 disables, maximum 4096), with `DECIDEALOT_CLM_CANDIDATE_CACHE_TTL_SECONDS=600` (positive, maximum 86400). Unloading CLM clears the cache; changing encoder weights behind the same URL requires a restart or unload. `DECIDEALOT_CLM_MAX_TEXT_BYTES=8192` limits each rendered state plus instructions or candidate before encoding. That is UTF-8 bytes, not tokens. Configure the external encoder to reject rather than truncate inputs beyond its context. Quantized Qwen vectors are not proof of full-precision accuracy parity.
 
 ## MCP
 

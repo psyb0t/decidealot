@@ -1,10 +1,11 @@
-"""The TypeSafe System One contract plus Decidealot's batch envelope.
+"""The TypeSafe System One contract with Decidealot request config and batching.
 
 System One models mirror the published TypeSafe OpenAPI document. The separate
-batch models wrap those requests and results without changing the official
-single-request contract. Native provider-only fields never reach a caller.
+batch models wrap those requests and results. Optional request config extends
+the official input; native provider-only response fields never reach a caller.
 """
 
+import json
 import logging
 from collections.abc import Iterable, Mapping
 from typing import Annotated, Any, Literal, cast
@@ -70,6 +71,7 @@ class SystemOneRequest(BaseModel):
     state: JSONValue
     model: str
     questions: dict[str, Question] = Field(min_length=1)
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class SystemOneBatchRequest(BaseModel):
@@ -312,5 +314,11 @@ def _validation_detail_entry(
     entry: dict[str, Any] = {"loc": [*location_prefix, *error["loc"]]}
     for field in _detail_fields:
         if field != "loc" and field in error:
+            if field == "input":
+                try:
+                    json.dumps(error[field], allow_nan=False)
+                except (ValueError, TypeError):
+                    # Invalid input must not break the strict JSON validation response.
+                    continue
             entry[field] = error[field]
     return entry

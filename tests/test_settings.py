@@ -70,6 +70,32 @@ def test_settings_rejects_invalid_clm_parallel_mode() -> None:
         Settings.model_validate({"clm_parallel_with_local_models": "maybe"})
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("clm_candidate_cache_entries", -1),
+        ("clm_candidate_cache_entries", 4097),
+        ("clm_candidate_cache_ttl_seconds", 0),
+        ("clm_candidate_cache_ttl_seconds", float("inf")),
+        ("clm_max_text_bytes", 0),
+        ("clm_max_text_bytes", 1048577),
+    ],
+)
+def test_settings_rejects_invalid_clm_cache_and_text_bounds(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate({field: value})
+
+
+def test_settings_reads_clm_cache_and_text_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DECIDEALOT_CLM_CANDIDATE_CACHE_ENTRIES", "0")
+    monkeypatch.setenv("DECIDEALOT_CLM_CANDIDATE_CACHE_TTL_SECONDS", "42")
+    monkeypatch.setenv("DECIDEALOT_CLM_MAX_TEXT_BYTES", "4096")
+    settings = Settings()
+    assert settings.clm_candidate_cache_entries == 0
+    assert settings.clm_candidate_cache_ttl_seconds == 42
+    assert settings.clm_max_text_bytes == 4096
+
+
 def test_settings_enables_clm_only_when_an_embeddings_endpoint_is_configured() -> None:
     disabled = Settings()
     enabled = Settings(clm_embeddings_url="https://embeddings.example.test/v1/embeddings")

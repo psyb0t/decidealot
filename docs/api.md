@@ -170,8 +170,32 @@ The default catalog above contains Laya and Von. When CLM is enabled, the respon
 | `model` | string | One exact selector from `GET /v1/models`. |
 | `state` | string, object, or array | The raw thing to classify, score, or judge. |
 | `questions` | object | One or more named `choice`, `score`, or `noul` questions. |
+| `config` | optional object | Provider-specific request settings. Omitted means native defaults. |
 
-Question names are yours. The response repeats them under `answers`. `instructions` is optional for all question types. It, `state`, and criterion values can be strings, JSON objects, or JSON arrays. Decidealot converts nested instruction and criterion values to text for local model runtimes without changing the choice labels, score order, or `state`. Jev receives the validated JSON structure with the exact hosted model name you selected.
+Question names are yours. The response repeats them under `answers`. `instructions` is optional in the wire schema, but supply it to state the question and decision rules explicitly. This matters especially for `noul`: a question name alone is not the proposition to evaluate. Instructions, state, and criterion values can be strings, JSON objects, or JSON arrays. Laya and Von receive nested instructions and criterion values as JSON text without changing labels, score order, or state. CLM preserves their structure and renders it using upstream's context-then-question layout. Jev receives the validated JSON structure with the exact hosted model name you selected.
+
+### Request configuration
+
+`config` is flat because `model` already selects its schema. CLM selectors accept `{"temperature":0.8}`. Temperature defaults to `1` and must be a finite number greater than `0` and at most `100`. It divides the scaled CLM logits before softmax. Lower temperatures sharpen probabilities, not accuracy. Strings, booleans, null, non-object configs, unknown keys, and values outside this range return `422`. Laya, Von, and hosted Jev accept only omitted or empty config; Decidealot strips the empty object before sending TypeSafe its official three-field request.
+
+```json
+{
+  "model": "clm",
+  "config": {"temperature": 0.8},
+  "state": "The customer requests a refund for a duplicate payment.",
+  "questions": {
+    "queue": {
+      "type": "choice",
+      "instructions": "Route payment or refund questions to billing; software failures to technical.",
+      "criteria": {"billing": "Payment or refund question", "technical": "Software failure"}
+    }
+  }
+}
+```
+
+The response remains `model`, `answers`, and `usage`. MCP `system_one` accepts the same optional config. Each request in HTTP batch or MCP `system_one_batch` has its own config. All batch configs are checked before executing any decision; invalid settings report `body.requests.<index>.config` and no item executes. Provider or encoder failures during execution still fail the batch without partial results and may happen after earlier items completed.
+
+CLM bounds each rendered state plus instructions and each candidate by `DECIDEALOT_CLM_MAX_TEXT_BYTES` (default `8192` UTF-8 bytes) before contacting its encoder. Over-limit inputs return `422`; Decidealot does not request truncation. Bytes are not tokens. The encoder's context limit and truncation behavior remain deployment settings. CLM caches candidate vectors only, with configurable LRU capacity and TTL. State vectors are always requested again. Cache hits reduce `usage.input_tokens`; it reports encoder usage for actual calls, not the hypothetical uncached workload.
 
 The response shape always contains `model`, `answers`, and `usage`. The numeric values below are examples. A real model call chooses its own answer and probabilities.
 

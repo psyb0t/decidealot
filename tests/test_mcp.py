@@ -144,7 +144,8 @@ def test_mcp_streamable_http_lists_tools_and_runs_a_system_one_decision() -> Non
     batch_result = cast(dict[str, Any], batch_response.json())["result"]
     assert batch_result["isError"] is False
     assert [item["model"] for item in batch_result["structuredContent"]["results"]] == [
-        "laya", "laya"
+        "laya",
+        "laya",
     ]
     assert unload_response.status_code == 200
     assert cast(dict[str, Any], unload_response.json())["result"]["structuredContent"] == {
@@ -371,7 +372,10 @@ def test_mcp_lists_and_uses_clm_when_it_is_the_only_enabled_provider() -> None:
             headers=session_headers,
             json=_mcp_message(
                 _tools_call_method,
-                {"name": "system_one", "arguments": system_one_request("clm")},
+                {
+                    "name": "system_one",
+                    "arguments": {**system_one_request("clm"), "config": {"temperature": 0.8}},
+                },
                 request_id=3,
             ),
         )
@@ -388,6 +392,45 @@ def test_mcp_lists_and_uses_clm_when_it_is_the_only_enabled_provider() -> None:
     decision_result = cast(dict[str, Any], decision_response.json())["result"]
     assert decision_result["structuredContent"]["model"] == "clm-0.1-8b"
     assert len(providers[CLM_PROVIDER_NAME].calls) == 1
+    assert providers[CLM_PROVIDER_NAME].calls[0][0]["temperature"] == 0.8
+
+
+def test_mcp_batch_rejects_bad_config_before_any_decision() -> None:
+    settings = Settings(
+        laya_enabled=False,
+        von_enabled=False,
+        clm_enabled=True,
+        clm_embeddings_url="https://encoder.example.test/v1/embeddings",
+    )
+    provider = FakeProvider(native_system_one_response("clm"))
+    app = create_embedded_app(
+        settings,
+        {CLM_PROVIDER_NAME: provider},
+        LifecycleSupervisor(provider_names=(CLM_PROVIDER_NAME,)),
+    )
+    with TestClient(app, base_url="http://127.0.0.1:8080", follow_redirects=False) as client:
+        headers = _initialize_session(client)
+        response = client.post(
+            _mcp_path,
+            headers=headers,
+            json=_mcp_message(
+                _tools_call_method,
+                {
+                    "name": "system_one_batch",
+                    "arguments": {
+                        "requests": [
+                            system_one_request("clm"),
+                            {**system_one_request("clm"), "config": {"temperature": True}},
+                        ]
+                    },
+                },
+                request_id=2,
+            ),
+        )
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert '"loc":["body","requests",1,"config","temperature"]' in result["content"][0]["text"]
+    assert provider.calls == []
 
 
 def test_mcp_lists_and_uses_hosted_jev_without_local_model_acquisition() -> None:

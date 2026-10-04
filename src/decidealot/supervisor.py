@@ -367,6 +367,9 @@ class ProviderSupervisor:
             "CLM_EMBEDDINGS_URL": self._settings.clm_embeddings_url or "",
             "CLM_EMBEDDINGS_MODEL": self._settings.clm_embeddings_model,
             "CLM_EMBEDDINGS_TIMEOUT_SECONDS": str(self._settings.clm_embeddings_timeout_seconds),
+            "CLM_CANDIDATE_CACHE_ENTRIES": str(self._settings.clm_candidate_cache_entries),
+            "CLM_CANDIDATE_CACHE_TTL_SECONDS": str(self._settings.clm_candidate_cache_ttl_seconds),
+            "CLM_MAX_TEXT_BYTES": str(self._settings.clm_max_text_bytes),
         }
         if self._settings.clm_embeddings_api_key is not None:
             clm_environment["CLM_EMBEDDINGS_API_KEY"] = (

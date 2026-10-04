@@ -7,6 +7,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.context import Context
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field
 
 from decidealot import __version__
 from decidealot.constants import MCP_SERVER_NAME, REQUEST_ID_HEADER
@@ -20,6 +21,7 @@ _system_one_batch_tool_name = "system_one_batch"
 _list_models_tool_name = "list_models"
 _unload_models_tool_name = "unload_models"
 _server_description = "Run typed System One decisions through Decidealot."
+_config_default: dict[str, Any] = Field(default_factory=dict)
 _server_instructions = (
     "Use system_one for one decision or system_one_batch for independent decisions."
 )
@@ -46,12 +48,13 @@ def create_mcp_server(decisions: DecisionService) -> MCPServer[object]:
         state: JSONValue,
         questions: dict[str, Any],
         context: Context[object, object],
+        config: dict[str, Any] = _config_default,
     ) -> dict[str, Any]:
         """Run the selected model against one state and named typed questions."""
 
         return await _run_tool(
             decisions.system_one(
-                {"model": model, "state": state, "questions": questions},
+                {"model": model, "state": state, "questions": questions, "config": config},
                 _request_id(context),
             )
         )

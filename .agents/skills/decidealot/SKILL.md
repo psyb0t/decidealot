@@ -37,7 +37,7 @@ Read [references/setup.md](references/setup.md) before deploying a container or 
 
 1. Get `DECIDEALOT_URL` from the user or their environment. Default local deployment is `http://127.0.0.1:8080`.
 2. Call `GET /health`, then `GET /v1/models` before choosing a selector you have not already been given. The catalog contains only providers enabled by the deployment.
-3. Put the raw subject in `state`. Define bounded questions in `questions`.
+3. Put the raw subject in `state`. State each question and its decision rules in `instructions`; define explicit criterion descriptions. For `noul`, instructions describe the true-or-false proposition, not just a label.
 4. Read the typed answer and its probabilities. Report them plainly. The caller, not the model, selects the next action.
 5. Use REST for application requests and machine-readable errors. Use MCP at `/mcp` when an MCP client already supports Streamable HTTP. Use the stdio bridge only for a client that cannot connect to remote MCP.
 
@@ -50,6 +50,10 @@ Use Decidealot for bounded classification, scoring, and true-or-false decisions.
 ## REST and MCP
 
 REST uses `POST /v1/systemone` for one decision and `POST /v1/systemone/batch` for independent decisions, plus `GET /v1/models` and `POST /v1/models/unload`. MCP is at `/mcp` and exposes matching `system_one`, `system_one_batch`, `list_models`, and `unload_models` tools. A batch uses `{"requests":[{"model":...,"state":...,"questions":...}]}` and returns ordered `results`; do not assume all items share the same state. Read [references/setup.md](references/setup.md) for exact deployment, upstream Jev key handling, authentication, REST, MCP, and bridge commands. Read the public [API guide](https://github.com/psyb0t/decidealot/blob/main/docs/api.md) before constructing an unfamiliar question type.
+
+## Request settings
+
+For a CLM request, optional flat `config` accepts `{"temperature":0.8}` with a finite temperature greater than zero and at most 100. Omit it for default 1. Other providers currently accept only omitted or empty config. The same field works in MCP and in each batch item. Unsupported settings fail rather than being ignored. Lower temperature sharpens probabilities, not correctness. Read the setup reference for CLM caching and input limits.
 
 ## Completion
 

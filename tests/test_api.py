@@ -32,9 +32,7 @@ from tests.conftest import (
 _operator_api_key = SecretStr("operator-secret")
 _operator_authorization = {"Authorization": "Bearer operator-secret"}
 _hosted_catalog = {
-    "models": [
-        {"name": "jev-latest", "description": "Hosted model", "release_date": "2026-09-10"}
-    ]
+    "models": [{"name": "jev-latest", "description": "Hosted model", "release_date": "2026-09-10"}]
 }
 
 
@@ -79,9 +77,7 @@ def test_batch_runs_independent_requests_and_preserves_order(
     second["state"] = "Second decision"
 
     with app_client(app) as client:
-        response = client.post(
-            "/v1/systemone/batch", json={"requests": [first, second]}
-        )
+        response = client.post("/v1/systemone/batch", json={"requests": [first, second]})
 
     assert response.status_code == 200
     assert response.json() == {
@@ -106,7 +102,8 @@ def test_batch_accepts_repeated_model_with_different_states(
     assert response.status_code == 200
     assert len(response.json()["results"]) == 2
     assert [call[0]["state"] for call in provider_pair[LAYA_PROVIDER_NAME].calls] == [
-        first["state"], second["state"]
+        first["state"],
+        second["state"],
     ]
 
 
@@ -128,17 +125,13 @@ def test_batch_runs_local_and_hosted_jev_with_one_local_slot(
         )
 
     assert response.status_code == 200
-    assert [item["model"] for item in response.json()["results"]] == [
-        "laya", "jev-latest"
-    ]
+    assert [item["model"] for item in response.json()["results"]] == ["laya", "jev-latest"]
     assert supervisor.acquired_providers == [LAYA_PROVIDER_NAME]
     assert len(providers[JEV_PROVIDER_NAME].calls) == 1
 
 
 def test_batch_with_one_request_has_one_result(client: HTTPClient) -> None:
-    response = client.post(
-        "/v1/systemone/batch", json={"requests": [system_one_request("laya")]}
-    )
+    response = client.post("/v1/systemone/batch", json={"requests": [system_one_request("laya")]})
 
     assert response.status_code == 200
     assert response.json() == {"results": [projected_system_one_response("laya")]}
@@ -388,9 +381,7 @@ def test_batch_authentication_precedes_provider_calls() -> None:
     app = create_embedded_app(Settings(api_key=_operator_api_key), {LAYA_PROVIDER_NAME: provider})
 
     with app_client(app) as client:
-        response = client.post(
-            "/v1/systemone/batch", json={"requests": [system_one_request()]}
-        )
+        response = client.post("/v1/systemone/batch", json={"requests": [system_one_request()]})
 
     assert response.status_code == 401
     assert provider.calls == []

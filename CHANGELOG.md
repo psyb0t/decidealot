@@ -2,6 +2,19 @@
 
 All notable changes per release. Versions follow [SemVer](https://semver.org/). Before 1.0, compatible additions use a minor version and fixes use a patch version. Breaking API or configuration changes are called out.
 
+## v0.7.0
+
+Added:
+
+- Added optional flat request config to REST, batch, and MCP. CLM supports validated temperature overrides; other providers reject unsupported settings.
+- Added a bounded candidate embedding cache with TTL and LRU eviction. Raw decision state is not cached. Cache capacity, expiry, and rendered UTF-8 input limits are configurable.
+
+Fixed:
+
+- Preserved structured CLM instructions and criteria, corrected default yes/no candidate rendering, and normalized encoder vectors before projection to match upstream inference.
+- Returned validation errors for nonfinite request settings without failing JSON serialization.
+- Ran the CLM integration harness inside the development container with access to its sibling fixtures.
+
 ## v0.6.0
 
 Added:
