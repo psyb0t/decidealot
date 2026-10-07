@@ -34,7 +34,7 @@ Use an immutable `vX.Y.Z` image tag for a lasting deployment. The full hardening
 
 Keep `DECIDEALOT_TYPESAFE_API_KEY` in the container's private environment. Jev enables automatically when it is set. To use Jev without downloading local bundles, set `DECIDEALOT_LAYA_ENABLED=false` and `DECIDEALOT_VON_ENABLED=false`, and leave CLM unconfigured. No `/models` mount is needed in that configuration. `DECIDEALOT_JEV_ENABLED=false` disables Jev even when a key exists. `DECIDEALOT_API_KEY` is a separate token that protects callers of Decidealot.
 
-Select one hosted model returned by `GET /v1/models`. Decidealot refreshes TypeSafe's authenticated catalog every 60 seconds and forwards the selected name exactly. The full state and questions go to TypeSafe, so confirm that the user's data is allowed to leave the host. The TypeSafe key stays server-side and never belongs in REST or MCP tool arguments.
+Select one hosted model returned by `GET /v1/models`. Decidealot caches TypeSafe's authenticated catalog for 60 seconds and refreshes it on the next model-listing or hosted-model request after expiry. It forwards the selected name exactly. The full state and questions go to TypeSafe, so confirm that the user's data is allowed to leave the host. The TypeSafe key stays server-side and never belongs in REST or MCP tool arguments.
 
 ## Authentication
 

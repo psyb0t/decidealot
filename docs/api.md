@@ -43,7 +43,7 @@ Missing or wrong credentials return `401`:
 
 ## MCP Streamable HTTP
 
-The container also exposes version 2 MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. It shares the decision service, public model aliases, request validation, body limit, Bearer authentication, and request ID rules with the TypeSafe-compatible HTTP endpoints. Local models use the provider supervisor; hosted Jev does not.
+The container also exposes MCP Streamable HTTP at `http://127.0.0.1:8080/mcp`. It shares the decision service, public model aliases, request validation, body limit, Bearer authentication, and request ID rules with the TypeSafe-compatible HTTP endpoints. Local models use the provider supervisor; hosted Jev does not.
 
 MCP clients differ in configuration syntax, but they need one Streamable HTTP server URL and the same optional Bearer header:
 
@@ -159,7 +159,7 @@ curl --fail --show-error "$base_url/v1/models" --header "$auth_header"
 }
 ```
 
-The default catalog above contains Laya and Von. When CLM is enabled, the response also contains `clm`, `clm-latest`, `clm-0.1`, and `clm-0.1-8b`. Those selectors run the local `Contrastive-LM/CLM-v0.1-8B` projection head. CLM sends rendered decision state and criterion text to the configured OpenAI-compatible embeddings endpoint, which must return Qwen3-8B last-token vectors with exactly 4096 float values for each input. When Jev is enabled, Decidealot adds the models and aliases returned by TypeSafe's authenticated `GET /v1/models`. It refreshes that catalog every 60 seconds. The listed hosted names are passed through exactly; Decidealot does not invent a `jev` alias. Local selectors win if TypeSafe ever returns a colliding name. If TypeSafe's catalog is unavailable or malformed, model listing and hosted requests return a safe `503`; local decisions still work.
+The default catalog above contains Laya and Von. When CLM is enabled, the response also contains `clm`, `clm-latest`, `clm-0.1`, and `clm-0.1-8b`. Those selectors run the local `Contrastive-LM/CLM-v0.1-8B` projection head. CLM sends rendered decision state and criterion text to the configured OpenAI-compatible embeddings endpoint, which must return Qwen3-8B last-token vectors with exactly 4096 float values for each input. When Jev is enabled, Decidealot adds the models and aliases returned by TypeSafe's authenticated `GET /v1/models`. It caches that catalog for 60 seconds and refreshes it on the next model-listing or hosted-model request after expiry. The listed hosted names are passed through exactly; Decidealot does not invent a `jev` alias. Local selectors win if TypeSafe ever returns a colliding name. If TypeSafe's catalog is unavailable or malformed, model listing and hosted requests return a safe `503`; local decisions still work.
 
 ## Make decisions
 

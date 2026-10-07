@@ -70,11 +70,30 @@ curl --fail http://127.0.0.1:8080/v1/systemone \
   }'
 ```
 
-The first service startup downloads the enabled pinned model bundles and can take several minutes. The default configuration enables Laya and Von. Wait for `/health` before sending a decision. Later service starts reuse the same host directory. The response includes `answers.handling.choice` and a probability per choice key. Your caller chooses what to do with that decision, for example only allowing `allow` when its probability meets your own threshold.
+The first service startup downloads the enabled pinned model bundles and can take several minutes. The default configuration enables Laya and Von. Wait for `/health` before sending a decision. Later service starts reuse the same host directory.
+
+An example response looks like this. The answer, probabilities, and token count vary with the model call:
+
+```json
+{
+  "model": "laya",
+  "answers": {
+    "handling": {
+      "type": "choice",
+      "choice": "require_review",
+      "confidence": 0.94,
+      "probabilities": {"allow": 0.06, "require_review": 0.94}
+    }
+  },
+  "usage": {"input_tokens": 91, "output_tokens": 0}
+}
+```
+
+For that result, your application queues the action for human review instead of running it. Decidealot does not perform the action. Your caller checks the chosen label and applies its own probability threshold, for example allowing an action only when `choice` is `allow` and `probabilities.allow` is at least `0.95`.
 
 ## Use hosted Jev
 
-Set `DECIDEALOT_TYPESAFE_API_KEY` in a private environment file or secret store. Jev enables automatically when the key is present. Call `GET /v1/models` and select a hosted name returned by TypeSafe, such as `jev-latest`. Decidealot refreshes the authenticated TypeSafe catalog every 60 seconds, so new hosted model names need no Decidealot release. It sends the complete `state` and `questions` to TypeSafe's fixed HTTPS API, not to a local model. The key never belongs in the request body, a tracked file, or a client-side application.
+Set `DECIDEALOT_TYPESAFE_API_KEY` in a private environment file or secret store. Jev enables automatically when the key is present. Call `GET /v1/models` and select a hosted name returned by TypeSafe, such as `jev-latest`. Decidealot caches the authenticated TypeSafe catalog for 60 seconds and refreshes it on the next model-listing or hosted-model request after expiry. New hosted model names need no Decidealot release. It sends the complete `state` and `questions` to TypeSafe's fixed HTTPS API, not to a local model. The key never belongs in the request body, a tracked file, or a client-side application.
 
 For a Jev-only container, disable all local models so startup downloads no model bundles. Pass the upstream key as an environment variable from your secret store, then use the same REST or MCP endpoint shown below:
 
@@ -101,7 +120,7 @@ Send the state to judge and a bounded question. Decidealot returns typed results
 | `POST /v1/systemone/batch` | Runs independent System One requests and returns an ordered `results` list. |
 | `GET /v1/models` | Lists every supported alias and the model behind it. |
 | `POST /v1/models/unload` | Stops loaded local providers; hosted Jev is unaffected. |
-| `/mcp` | Version 2 MCP Streamable HTTP, with `system_one`, `system_one_batch`, `list_models`, and `unload_models` tools. |
+| `/mcp` | MCP Streamable HTTP, with `system_one`, `system_one_batch`, `list_models`, and `unload_models` tools. |
 | `GET /health` | Reports whether configured local bundles are ready. Jev-only startup has no bundle download. |
 
 `choice` questions need named `criteria`. `score` questions need an ordered criteria array whose position is the score. `noul` questions return a probability between zero and one. [The API guide](docs/api.md) has the request rules, response shape, validation failures, aliases, authentication, and lifecycle behavior.

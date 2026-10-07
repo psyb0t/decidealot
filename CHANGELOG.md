@@ -2,6 +2,14 @@
 
 All notable changes per release. Versions follow [SemVer](https://semver.org/). Before 1.0, compatible additions use a minor version and fixes use a patch version. Breaking API or configuration changes are called out.
 
+## v0.7.1
+
+Fixed:
+
+- Added a quick-start response example and explained how the caller applies its decision and probability threshold.
+- Clarified that the hosted TypeSafe model catalog refreshes on demand after its 60-second cache expires.
+- Corrected MCP transport wording in the README and API guide, and synchronized the deployment and agent setup references.
+
 ## v0.7.0
 
 Added:
