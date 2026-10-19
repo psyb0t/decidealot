@@ -37,6 +37,7 @@ dist/
 
 # Container and local tooling state
 git-update.sh
+git-update.sh.debot
 .dockerignore.local
 .vscode/
 .idea/
