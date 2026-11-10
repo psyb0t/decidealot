@@ -8,4 +8,3 @@ Prefix: SEC.
 - **SEC4:** Logs go through `RedactingFormatter`, which replaces values under keys matching password, token, secret, API key, authorization or cookie. Never log a request body, decision state, criteria or a key value; log provider names, status codes and error types.
 - **SEC5:** Images run as non-root `1000:1000`, and the documented `docker run` and Compose recipes keep `--read-only`, `--cap-drop ALL`, `no-new-privileges`, bounded tmpfs mounts and a loopback publish. Do not weaken them in docs or examples.
 - **SEC6:** CLM sends rendered state and criteria to its configured embeddings URL and Jev sends the full request to TypeSafe. Docs that mention either say that data leaves the host.
-- **SEC7:** No real secret, token or host name in code, tests, docs or examples. Use placeholders such as `your-token-here`, `replace-with-a-real-secret` and `mcp.example.net`.
