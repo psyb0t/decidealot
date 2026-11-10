@@ -15,6 +15,8 @@ DOCKER_SOCK := /var/run/docker.sock
 DOCKER_GID := $(shell stat -c '%g' $(DOCKER_SOCK) 2>/dev/null || echo 0)
 DEPENDENCY_CUTOFF := 2026-09-16T22:52:02Z
 MODEL_EXCEPTION_CUTOFF := 2026-09-23T13:10:08Z
+DOCS_SITE := .testing/docs-site
+DOCS_IMAGE := ghcr.io/actions/jekyll-build-pages:v1.0.13@sha256:6791ebfd912185ed59bfb5fb102664fa872496b79f87ff8b9cfba292a7345041
 
 DEV_RUN := docker run --rm --init --user $(UID):$(GID) -e HOME=/tmp \
 	-e PYTHONPATH=/work/src -e VIRTUAL_ENV=/opt/venv -e PATH=/opt/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -27,7 +29,7 @@ DEV_RUN_DIND := docker run --rm --init --network host --user $(UID):$(GID) \
 	-v $(CURDIR):$(CURDIR) -w $(CURDIR) \
 	-v $(DOCKER_SOCK):$(DOCKER_SOCK) $(DEV_IMAGE)
 
-.PHONY: help dev-image dev-tools-image shell pkg-lock pkg-add pkg-update pkg-upgrade pkg-remove model-lock dep format lint lint-fix audit sec test test-unit test-integration test-coverage test-real test-real-cuda test-real-clm test-real-jev generate build build-cuda build-all build-test build-test-cuda run run-cuda restart restart-cuda stop status audit-compose audit-compose-cuda version clean
+.PHONY: help dev-image dev-tools-image shell pkg-lock pkg-add pkg-update pkg-upgrade pkg-remove model-lock dep format lint lint-fix audit sec test test-unit test-integration test-coverage test-real test-real-cuda test-real-clm test-real-jev generate build build-cuda build-all build-test build-test-cuda run run-cuda restart restart-cuda stop status audit-compose audit-compose-cuda docs version clean
 
 help: ## List supported operations
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -151,6 +153,13 @@ audit-compose: ## Enforce the production Compose hardening floor
 
 audit-compose-cuda: ## Enforce hardening after applying the CUDA Compose override
 	bash scripts/audit-compose.sh --cuda
+
+docs: ## Build the documentation site into .testing/docs-site
+	mkdir --parents "$(DOCS_SITE)"
+	docker run --rm --user $(UID):$(GID) -e HOME=/tmp \
+		-e GITHUB_WORKSPACE=/work -e GITHUB_REPOSITORY=psyb0t/decidealot \
+		-e INPUT_SOURCE=docs -e INPUT_DESTINATION="$(DOCS_SITE)" -e INPUT_VERBOSE=false \
+		-v $(CURDIR):/work $(DOCS_IMAGE)
 
 version: ## Print the canonical version
 	@echo $(TAG)

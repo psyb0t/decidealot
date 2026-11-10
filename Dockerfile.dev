@@ -26,6 +26,12 @@ WORKDIR /work
 
 FROM tools AS development
 
+# pyright downloads Node.js on first use, and the newest release can break its
+# installer. Install a pinned Node.js here so lint runs reuse it.
+ENV PYRIGHT_PYTHON_CACHE_DIR=/opt/pyright-cache
+
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --group dev --no-install-project
+    uv sync --frozen --group dev --no-install-project \
+    && PYRIGHT_PYTHON_NODE_VERSION=22.20.0 /opt/venv/bin/python -m pyright --version \
+    && chmod --recursive a+rX "$PYRIGHT_PYTHON_CACHE_DIR"

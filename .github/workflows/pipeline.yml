@@ -1,21 +1,25 @@
 name: pipeline
 
-on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+# Every branch push runs lint, the offline tests with the coverage gate, the
+# security scan and the generate check. A push to main then builds the CPU and
+# CUDA images and publishes :latest, :latest-cuda and the matching
+# :sha-<commit> tags. A v* tag waits for that commit's main run to succeed,
+# promotes the same image digests to the release tags without rebuilding,
+# cuts the GitHub Release, and publishes the skill, the OpenClaw bridge and
+# the MCP Registry entry.
+on: [push]
 
 permissions: {}
 
 jobs:
+  # Every command runs in the Dockerfile.dev toolchain image, so the runner
+  # needs only Docker, Make, Bash and jq. No credentials. The real-model and
+  # hosted Jev tests stay out of CI.
   code:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: "!startsWith(github.ref, 'refs/tags/')"
     permissions:
       contents: read
-      security-events: write
+      security-events: write # for the sec SARIF upload
     uses: psyb0t/reusable-github-workflows/.github/workflows/code-workflow.yml@master
     with:
       lint_command: "make lint"
@@ -26,18 +30,33 @@ jobs:
       sarif_file: "sec.sarif"
       sarif_category: "python"
 
-  docker:
-    needs: [code]
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+  # Tag runs read the coverage artifact from the main run they promote.
+  badges:
+    needs: [code, wait]
+    if: "always() && ((github.ref_name == github.event.repository.default_branch && needs.code.result == 'success') || (startsWith(github.ref, 'refs/tags/') && needs.wait.result == 'success'))"
     permissions:
       contents: write
-      security-events: write
+      actions: read # cross-run coverage artifact download on tags
+    uses: psyb0t/reusable-github-workflows/.github/workflows/create-badges.yml@master
+    with:
+      coverage: true
+      coverage_run_id: ${{ needs.wait.outputs.run_id }}
+
+  # The called workflow builds only on main/master or tags, so other branches
+  # stop after the code job.
+  call-docker-image-workflow:
+    needs: [code]
+    if: "!startsWith(github.ref, 'refs/tags/')"
+    permissions:
+      contents: write # GitHub Release
+      security-events: write # upload the Grype SARIF to the Security tab
     uses: psyb0t/reusable-github-workflows/.github/workflows/docker-image-workflow.yml@master
     with:
       repository_name: psyb0t/decidealot
+      push_sha_tag: true
+      create_release: false
       target_platforms: "linux/amd64"
-      build_targets: >-
-        [{"file":"Dockerfile","tag_suffix":"","platforms":"linux/amd64"},{"file":"Dockerfile.cuda","tag_suffix":"-cuda","platforms":"linux/amd64"}]
+      build_targets: '[{"file":"Dockerfile","tag_suffix":"","platforms":"linux/amd64"},{"file":"Dockerfile.cuda","tag_suffix":"-cuda","platforms":"linux/amd64"}]'
       scan_severity: "high"
       scan_fail_build: false
       dockerhub_private: false
@@ -47,28 +66,63 @@ jobs:
       dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
       dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  badges:
-    needs: [code]
-    if: github.ref_name == github.event.repository.default_branch || startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
-    uses: psyb0t/reusable-github-workflows/.github/workflows/create-badges.yml@master
-    with:
-      coverage: true
-
-  publish-to-mcp-registry:
-    needs: [docker]
+  wait:
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
-      id-token: write
-      contents: read
-    uses: psyb0t/reusable-github-workflows/.github/workflows/mcp-registry-publish.yml@master
+      actions: read
+    uses: psyb0t/reusable-github-workflows/.github/workflows/wait-for-default-branch.yml@master
+    with:
+      timeout_minutes: 180
 
+  docker-promote:
+    needs: [wait]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      # The called workflow's release job asks for write even when
+      # create_release turns it off, and GitHub checks that up front.
+      contents: write
+      security-events: write
+    uses: psyb0t/reusable-github-workflows/.github/workflows/docker-image-workflow.yml@master
+    with:
+      repository_name: psyb0t/decidealot
+      target_platforms: "linux/amd64"
+      build_targets: '[{"file":"Dockerfile","tag_suffix":"","platforms":"linux/amd64"},{"file":"Dockerfile.cuda","tag_suffix":"-cuda","platforms":"linux/amd64"}]'
+      promote_on_tag: true
+      # The release job below cuts the release from the tag's own notes.
+      create_release: false
+      scan_severity: "high"
+      scan_fail_build: false
+      dockerhub_private: false
+      sync_description: true
+    secrets:
+      dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+      dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  release:
+    needs: [docker-promote]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    uses: psyb0t/reusable-github-workflows/.github/workflows/release-workflow.yml@master
+
+  # Publish the skill and the OpenClaw MCP bridge to ClawHub once the release
+  # and the images they point at exist.
   publish-to-clawhub:
-    needs: [docker]
+    needs: [release]
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: read
     uses: psyb0t/reusable-github-workflows/.github/workflows/clawhub-publish.yml@master
+    with:
+      skill_names: '["decidealot"]'
+      plugin_names: '["decidealot"]'
     secrets:
       clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
+
+  publish-to-mcp-registry:
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      id-token: write # secretless OIDC auth to the registry
+      contents: read
+    uses: psyb0t/reusable-github-workflows/.github/workflows/mcp-registry-publish.yml@master

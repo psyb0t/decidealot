@@ -2,6 +2,18 @@
 
 All notable changes per release. Versions follow [SemVer](https://semver.org/). Before 1.0, compatible additions use a minor version and fixes use a patch version. Breaking API or configuration changes are called out.
 
+## v0.7.2
+
+Fixed:
+
+- The development image installs a pinned Node.js for pyright, so `make lint` no longer breaks when a new Node.js release changes its installer.
+
+Changed:
+
+- The documentation is published at https://psyb0t.github.io/decidealot/, and the reference material moved there from the README.
+- Every branch push runs lint, the offline tests with the coverage gate, the security scan and the generate check; pull requests no longer trigger a separate run. A version tag promotes the CPU and CUDA images already built for that main commit instead of rebuilding them, then publishes the GitHub release, the skill, the OpenClaw bridge and the MCP Registry entry.
+- Buy Me a Coffee is in the funding links, and `AGENTS.md` plus project rules in `.agents/rules/` are committed for coding agents.
+
 ## v0.7.1
 
 Fixed:

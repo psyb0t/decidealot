@@ -1,6 +1,6 @@
 # Agent and local development state
-AGENTS.md
 CODEX.local.md
+*.local.json
 .research_files/
 .testing/
 .agent_notes/
